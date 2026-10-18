@@ -46,7 +46,7 @@ const OrganicCropFieldWaves: React.FC<{ mouse: { x: number; y: number } }> = ({ 
     return [pos, initY, col];
   }, [count]);
 
-  useFrame((state, delta) => {
+  useFrame((state) => {
     if (!pointsRef.current) return;
     const posAttr = pointsRef.current.geometry.attributes.position as THREE.BufferAttribute;
     const array = posAttr.array as Float32Array;
@@ -85,7 +85,7 @@ const OrganicCropFieldWaves: React.FC<{ mouse: { x: number; y: number } }> = ({ 
   );
 };
 
-// 2. 3D Swaying Wheat Stalks & Green Foliage on Horizon
+// 2. 3D Swaying Wheat Stalks & Green Shoots
 const SwayingAgriculturalCrops: React.FC = () => {
   const wheatGroupRef = useRef<THREE.Group>(null);
 
@@ -100,22 +100,16 @@ const SwayingAgriculturalCrops: React.FC = () => {
 
   return (
     <group ref={wheatGroupRef} position={[0, -4.5, -3]}>
-      {/* Golden Wheat & Emerald Shoots along the lower edge */}
       {Array.from({ length: 32 }).map((_, i) => {
         const x = (i - 16) * 0.95;
         const isWheat = i % 2 === 0;
 
         return (
           <group key={`crop-${i}`} position={[x, 0, (i % 3) * 0.8]}>
-            {/* Stalk */}
             <mesh position={[0, 1.2, 0]}>
               <cylinderGeometry args={[0.02, 0.035, 2.4, 6]} />
-              <meshStandardMaterial
-                color={isWheat ? '#eab308' : '#16a34a'}
-                roughness={0.6}
-              />
+              <meshStandardMaterial color={isWheat ? '#eab308' : '#16a34a'} roughness={0.6} />
             </mesh>
-            {/* Wheat Ear / Leaf Head */}
             <mesh position={[0, 2.4, 0]}>
               <coneGeometry args={[0.1, 0.6, 6]} />
               <meshStandardMaterial
@@ -131,7 +125,193 @@ const SwayingAgriculturalCrops: React.FC = () => {
   );
 };
 
-// 3. Floating Golden Sunlight Spores & Dew Particles
+// 3. Animated 3D Farmer in the Harvest Field
+const AnimatedFarmer: React.FC = () => {
+  const armRef = useRef<THREE.Group>(null);
+  const farmerRef = useRef<THREE.Group>(null);
+
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    if (farmerRef.current) {
+      farmerRef.current.position.y = -2.8 + Math.sin(t * 1.8) * 0.04;
+    }
+    if (armRef.current) {
+      armRef.current.rotation.z = -0.3 + Math.sin(t * 2.2) * 0.22;
+      armRef.current.rotation.x = Math.cos(t * 1.6) * 0.15;
+    }
+  });
+
+  return (
+    <group ref={farmerRef} position={[-7.2, -2.8, -1.5]} scale={0.85}>
+      {/* Traditional Farmer Straw Hat */}
+      <mesh position={[0, 1.55, 0]}>
+        <coneGeometry args={[0.45, 0.22, 16]} />
+        <meshStandardMaterial color="#d97706" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 1.45, 0]}>
+        <cylinderGeometry args={[0.68, 0.68, 0.03, 16]} />
+        <meshStandardMaterial color="#b45309" roughness={0.9} />
+      </mesh>
+      {/* Head */}
+      <mesh position={[0, 1.3, 0]}>
+        <sphereGeometry args={[0.2, 16, 16]} />
+        <meshStandardMaterial color="#fcd34d" roughness={0.6} />
+      </mesh>
+      {/* Farmer Tunic Shirt */}
+      <mesh position={[0, 0.75, 0]}>
+        <cylinderGeometry args={[0.25, 0.3, 0.75, 12]} />
+        <meshStandardMaterial color="#047857" roughness={0.7} />
+      </mesh>
+      {/* Cotton Overalls */}
+      <mesh position={[0, 0.68, 0.02]}>
+        <boxGeometry args={[0.36, 0.65, 0.32]} />
+        <meshStandardMaterial color="#1e3a8a" roughness={0.8} />
+      </mesh>
+      {/* Animated Harvesting Arm with Sickle */}
+      <group ref={armRef} position={[0.26, 0.98, 0]}>
+        <mesh position={[0.15, -0.22, 0]} rotation={[0, 0, -0.4]}>
+          <cylinderGeometry args={[0.06, 0.06, 0.45, 8]} />
+          <meshStandardMaterial color="#047857" roughness={0.7} />
+        </mesh>
+        <mesh position={[0.3, -0.42, 0]} rotation={[0, 0, 1.2]}>
+          <torusGeometry args={[0.13, 0.025, 8, 16, Math.PI]} />
+          <meshStandardMaterial color="#e2e8f0" metalness={0.8} roughness={0.2} />
+        </mesh>
+      </group>
+      {/* Left Resting Arm */}
+      <mesh position={[-0.26, 0.78, 0.1]} rotation={[0.4, 0, 0.2]}>
+        <cylinderGeometry args={[0.06, 0.06, 0.45, 8]} />
+        <meshStandardMaterial color="#047857" roughness={0.7} />
+      </mesh>
+      {/* Legs & Boots */}
+      <mesh position={[-0.12, 0.2, 0]}>
+        <cylinderGeometry args={[0.09, 0.09, 0.55, 8]} />
+        <meshStandardMaterial color="#1e3a8a" roughness={0.8} />
+      </mesh>
+      <mesh position={[0.12, 0.2, 0]}>
+        <cylinderGeometry args={[0.09, 0.09, 0.55, 8]} />
+        <meshStandardMaterial color="#1e3a8a" roughness={0.8} />
+      </mesh>
+      <mesh position={[-0.12, -0.1, 0.05]}>
+        <boxGeometry args={[0.14, 0.1, 0.22]} />
+        <meshStandardMaterial color="#78350f" roughness={0.9} />
+      </mesh>
+      <mesh position={[0.12, -0.1, 0.05]}>
+        <boxGeometry args={[0.14, 0.1, 0.22]} />
+        <meshStandardMaterial color="#78350f" roughness={0.9} />
+      </mesh>
+    </group>
+  );
+};
+
+// 4. Animated Farm Tractor Rolling along the Field Horizon
+const AnimatedFarmTractor: React.FC = () => {
+  const tractorRef = useRef<THREE.Group>(null);
+  const wheelsRef = useRef<THREE.Group>(null);
+
+  useFrame((_, delta) => {
+    if (tractorRef.current) {
+      tractorRef.current.position.x -= delta * 1.1;
+      if (tractorRef.current.position.x < -18) {
+        tractorRef.current.position.x = 18;
+      }
+    }
+    if (wheelsRef.current) {
+      wheelsRef.current.children.forEach((wheel) => {
+        wheel.rotation.z -= delta * 3.8;
+      });
+    }
+  });
+
+  return (
+    <group ref={tractorRef} position={[12, -2.9, -3.8]} scale={0.65}>
+      {/* Main Body Engine Chassis */}
+      <mesh position={[0, 0.5, 0]}>
+        <boxGeometry args={[1.5, 0.6, 0.85]} />
+        <meshStandardMaterial color="#16a34a" metalness={0.4} roughness={0.3} />
+      </mesh>
+      {/* Hood */}
+      <mesh position={[-0.7, 0.45, 0]}>
+        <boxGeometry args={[0.8, 0.5, 0.7]} />
+        <meshStandardMaterial color="#15803d" metalness={0.5} roughness={0.3} />
+      </mesh>
+      {/* Cab Frame */}
+      <mesh position={[0.3, 1.05, 0]}>
+        <boxGeometry args={[0.75, 0.65, 0.75]} />
+        <meshStandardMaterial color="#f8fafc" transparent opacity={0.65} />
+      </mesh>
+      {/* Exhaust Pipe */}
+      <mesh position={[-0.8, 0.95, 0.25]}>
+        <cylinderGeometry args={[0.04, 0.04, 0.55, 8]} />
+        <meshStandardMaterial color="#334155" metalness={0.7} />
+      </mesh>
+      {/* Wheels */}
+      <group ref={wheelsRef}>
+        <mesh position={[0.45, 0.35, 0.52]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.55, 0.55, 0.22, 16]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.9} />
+        </mesh>
+        <mesh position={[0.45, 0.35, -0.52]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.55, 0.55, 0.22, 16]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.9} />
+        </mesh>
+        <mesh position={[-0.85, 0.2, 0.46]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.34, 0.34, 0.18, 16]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.9} />
+        </mesh>
+        <mesh position={[-0.85, 0.2, -0.46]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.34, 0.34, 0.18, 16]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.9} />
+        </mesh>
+      </group>
+    </group>
+  );
+};
+
+// 5. Flocking Farm Birds in the Sky
+const FlockingFarmBirds: React.FC = () => {
+  const birdsRef = useRef<THREE.Group>(null);
+
+  useFrame((state) => {
+    if (birdsRef.current) {
+      const t = state.clock.elapsedTime;
+      birdsRef.current.position.x = ((t * 1.4) % 38) - 19;
+      birdsRef.current.position.y = 4.4 + Math.sin(t * 0.9) * 0.45;
+
+      birdsRef.current.children.forEach((bird, i) => {
+        const wing = bird.children[1];
+        if (wing) {
+          wing.rotation.z = Math.sin(t * 7 + i) * 0.4;
+        }
+      });
+    }
+  });
+
+  return (
+    <group ref={birdsRef} position={[-18, 4.4, -6]}>
+      {[-1.2, 0, 1.2].map((offset, i) => (
+        <group key={`bird-${i}`} position={[offset * 0.8, (i % 2) * 0.3, (i % 3) * 0.4]} scale={0.28}>
+          <mesh>
+            <coneGeometry args={[0.08, 0.45, 4]} />
+            <meshBasicMaterial color="#064e3b" />
+          </mesh>
+          <group>
+            <mesh position={[0.28, 0, 0]} rotation={[0, 0, 0.35]}>
+              <boxGeometry args={[0.45, 0.03, 0.18]} />
+              <meshBasicMaterial color="#047857" />
+            </mesh>
+            <mesh position={[-0.28, 0, 0]} rotation={[0, 0, -0.35]}>
+              <boxGeometry args={[0.45, 0.03, 0.18]} />
+              <meshBasicMaterial color="#047857" />
+            </mesh>
+          </group>
+        </group>
+      ))}
+    </group>
+  );
+};
+
+// 6. Floating Golden Sunlight Spores
 const FloatingSunlitSpores: React.FC<{ count?: number }> = ({ count = 75 }) => {
   const pointsRef = useRef<THREE.Points>(null);
 
@@ -182,16 +362,14 @@ const FloatingSunlitSpores: React.FC<{ count?: number }> = ({ count = 75 }) => {
   );
 };
 
-// 4. Subtle Farm Sun Orb in Upper Right
+// 7. Subtle Farm Sun Orb
 const RisingFarmSun: React.FC = () => {
   return (
     <group position={[9, 6, -10]}>
-      {/* Sun Core */}
       <mesh>
         <sphereGeometry args={[1.8, 24, 24]} />
         <meshBasicMaterial color="#fef08a" />
       </mesh>
-      {/* Radiant Solar Glow Halo */}
       <mesh>
         <sphereGeometry args={[3.2, 24, 24]} />
         <meshBasicMaterial color="#f59e0b" transparent opacity={0.25} />
@@ -245,8 +423,11 @@ export const AtmosphericBackgroundCanvas: React.FC = () => {
         <pointLight position={[-6, -3, 3]} intensity={0.9} color="#10b981" />
 
         <RisingFarmSun />
+        <FlockingFarmBirds />
         <OrganicCropFieldWaves mouse={mouse} />
         <SwayingAgriculturalCrops />
+        <AnimatedFarmer />
+        <AnimatedFarmTractor />
         <FloatingSunlitSpores count={80} />
       </Canvas>
     </div>

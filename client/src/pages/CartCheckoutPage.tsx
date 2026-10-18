@@ -18,6 +18,7 @@ import {
 import confetti from 'canvas-confetti';
 import { useCart } from '../context/CartContext.js';
 import { useAuth } from '../context/AuthContext.js';
+import { playPaymentSuccessSound } from '../utils/sound.js';
 import api from '../services/api.js';
 
 export const CartCheckoutPage: React.FC = () => {
@@ -149,6 +150,7 @@ export const CartCheckoutPage: React.FC = () => {
                 });
 
                 if (verifyRes.data.success) {
+                  playPaymentSuccessSound();
                   confetti({
                     particleCount: 90,
                     spread: 70,
@@ -188,6 +190,7 @@ export const CartCheckoutPage: React.FC = () => {
       const res = await api.post('/orders', orderPayload);
 
       if (res.data.success && res.data.order) {
+        playPaymentSuccessSound();
         confetti({
           particleCount: 80,
           spread: 70,

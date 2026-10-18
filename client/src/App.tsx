@@ -3,7 +3,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Navbar } from './components/Navbar.js';
 import { Footer } from './components/Footer.js';
 import { MobileDownNav } from './components/MobileDownNav.js';
-import { Sidebar } from './components/Sidebar.js';
 import { LoadingLogo } from './components/LoadingLogo.js';
 import { AtmosphericBackgroundCanvas } from './components/3d/AtmosphericBackgroundCanvas.js';
 import { AIAdvisorModal } from './components/AIAdvisorModal.js';
@@ -24,7 +23,6 @@ export const App: React.FC = () => {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authDefaultRole, setAuthDefaultRole] = useState<UserRole>('buyer');
   const [aiModalOpen, setAiModalOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const handleOpenAuth = (role?: UserRole) => {
     if (role) setAuthDefaultRole(role);
@@ -40,20 +38,10 @@ export const App: React.FC = () => {
         {/* Global Living 3D Atmospheric Background */}
         <AtmosphericBackgroundCanvas />
 
-        {/* Desktop Side Navigation Bar (Displayed only after login, disappears when toggled) */}
-        {user && sidebarOpen && (
-          <Sidebar
-            onOpenAI={() => setAiModalOpen(true)}
-            onClose={() => setSidebarOpen(false)}
-          />
-        )}
-
-        <div className={`flex-1 flex flex-col transition-all duration-300 ${user && sidebarOpen ? 'md:pl-64' : 'md:pl-0'}`}>
+        <div className="flex-1 flex flex-col w-full">
           <Navbar
             onOpenAuth={() => handleOpenAuth('buyer')}
             onOpenAI={() => setAiModalOpen(true)}
-            onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-            sidebarOpen={sidebarOpen}
           />
 
           <main className="flex-1 pb-20 md:pb-0">

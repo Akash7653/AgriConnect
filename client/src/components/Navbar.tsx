@@ -16,9 +16,9 @@ import {
   Sparkles,
   Menu,
   X,
-  PanelLeftClose,
-  PanelLeftOpen,
   Check,
+  Store,
+  Package,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.js';
 import { useLanguage } from '../context/LanguageContext.js';
@@ -29,16 +29,9 @@ import { UserRole } from '../types/index.js';
 interface NavbarProps {
   onOpenAuth: () => void;
   onOpenAI: () => void;
-  onToggleSidebar?: () => void;
-  sidebarOpen?: boolean;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({
-  onOpenAuth,
-  onOpenAI,
-  onToggleSidebar,
-  sidebarOpen = true,
-}) => {
+export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, onOpenAI }) => {
   const { user, logout } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const { theme, toggleTheme } = useTheme();
@@ -64,37 +57,36 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
+  const getRoleDashboardLabel = (role: UserRole) => {
+    switch (role) {
+      case 'farmer':
+        return 'Farmer Hub';
+      case 'buyer':
+        return 'My Orders';
+      case 'business':
+        return 'B2B Portal';
+      case 'logistics':
+        return 'Logistics Hub';
+      case 'admin':
+        return 'Admin Panel';
+      default:
+        return 'Dashboard';
+    }
+  };
+
   return (
     <header className="sticky top-0 z-40 w-full max-w-full overflow-visible border-b border-slate-200/60 dark:border-slate-800/80 liquid-glass transition-all">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 w-full">
-        {/* Left Section: Sidenav Toggle + Brand Logo */}
+        {/* Left Section: Brand Logo */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          {/* Desktop Sidenav Collapse Toggle (Active when logged in) */}
-          {user && onToggleSidebar && (
-            <button
-              onClick={onToggleSidebar}
-              className="hidden md:flex p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              title={sidebarOpen ? 'Hide Sidebar' : 'Show Sidebar'}
-            >
-              {sidebarOpen ? (
-                <PanelLeftClose className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-              ) : (
-                <PanelLeftOpen className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-              )}
-            </button>
-          )}
-
-          {/* Brand Logo */}
           <Link to="/" className="flex items-center gap-2 group shrink-0">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-agri-600 to-forest flex items-center justify-center text-white shadow-md shadow-agri-700/20 group-hover:scale-105 transition-transform shrink-0">
               <Sprout className="w-5 h-5 text-emerald-200" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-lg sm:text-xl tracking-tight text-forest dark:text-emerald-400">
-                  AgriConnect
-                </span>
-              </div>
+              <span className="font-extrabold text-lg sm:text-xl tracking-tight text-forest dark:text-emerald-400 block leading-tight">
+                AgriConnect
+              </span>
               <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-medium tracking-tight truncate hidden xs:block">
                 From Farm to Every Table
               </p>
@@ -102,24 +94,41 @@ export const Navbar: React.FC<NavbarProps> = ({
           </Link>
         </div>
 
-        {/* Desktop Nav Links (Visible only for non-logged in guests, since Sidenav handles navigation when logged in) */}
-        {!user && (
-          <nav className="hidden lg:flex items-center gap-3 xl:gap-6 text-xs xl:text-sm font-semibold text-slate-700 dark:text-slate-200">
-            <Link to="/marketplace" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition">
-              {t('navMarketplace')}
-            </Link>
+        {/* Desktop Top Nav Links */}
+        <nav className="hidden lg:flex items-center gap-4 xl:gap-6 text-xs xl:text-sm font-semibold text-slate-700 dark:text-slate-200">
+          <Link
+            to="/marketplace"
+            className="flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
+          >
+            <Store className="w-4 h-4 text-emerald-600" />
+            <span>{t('navMarketplace')}</span>
+          </Link>
+          <Link
+            to="/b2b/procurement"
+            className="flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
+          >
+            <Building2 className="w-4 h-4 text-emerald-600" />
+            <span>{t('navB2B')}</span>
+          </Link>
+          <Link
+            to="/farmer/dashboard"
+            className="flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
+          >
+            <Sprout className="w-4 h-4 text-emerald-600" />
+            <span>{t('navForFarmers')}</span>
+          </Link>
+
+          {/* Role-Specific Portal Link in Top Nav */}
+          {user && (
             <Link
-              to="/b2b/procurement"
-              className="flex items-center gap-1 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
+              to={getDashboardRoute(user.role)}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-bold hover:bg-emerald-100 transition"
             >
-              <Building2 className="w-4 h-4 text-emerald-600" />
-              <span>{t('navB2B')}</span>
+              <LayoutDashboard className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{getRoleDashboardLabel(user.role)}</span>
             </Link>
-            <Link to="/farmer/dashboard" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition">
-              {t('navForFarmers')}
-            </Link>
-          </nav>
-        )}
+          )}
+        </nav>
 
         {/* Right Action Icons */}
         <div className="flex items-center gap-1 sm:gap-2.5 shrink-0">
@@ -133,7 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="hidden sm:inline">AI Advisor</span>
           </button>
 
-          {/* Language Selector Dropdown (Fixed Overflow) */}
+          {/* Language Selector Dropdown */}
           <div className="relative">
             <button
               onClick={() => {
@@ -158,42 +167,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="px-3 py-1.5 border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold uppercase text-slate-400">
                     Select Language
                   </div>
-                  <button
-                    onClick={() => {
-                      setLanguage('en');
-                      setLangMenuOpen(false);
-                    }}
-                    className={`w-full text-left px-3.5 py-2 hover:bg-emerald-50 dark:hover:bg-slate-800 flex items-center justify-between ${
-                      language === 'en' ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span>English</span>
-                    {language === 'en' && <Check className="w-3.5 h-3.5 text-emerald-600" />}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setLanguage('te');
-                      setLangMenuOpen(false);
-                    }}
-                    className={`w-full text-left px-3.5 py-2 hover:bg-emerald-50 dark:hover:bg-slate-800 flex items-center justify-between ${
-                      language === 'te' ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span>తెలుగు (Telugu)</span>
-                    {language === 'te' && <Check className="w-3.5 h-3.5 text-emerald-600" />}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setLanguage('hi');
-                      setLangMenuOpen(false);
-                    }}
-                    className={`w-full text-left px-3.5 py-2 hover:bg-emerald-50 dark:hover:bg-slate-800 flex items-center justify-between ${
-                      language === 'hi' ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span>हिंदी (Hindi)</span>
-                    {language === 'hi' && <Check className="w-3.5 h-3.5 text-emerald-600" />}
-                  </button>
+                  {[
+                    { code: 'en', label: 'English' },
+                    { code: 'te', label: 'తెలుగు (Telugu)' },
+                    { code: 'hi', label: 'हिंदी (Hindi)' },
+                  ].map((l) => (
+                    <button
+                      key={l.code}
+                      onClick={() => {
+                        setLanguage(l.code as any);
+                        setLangMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-3.5 py-2 hover:bg-emerald-50 dark:hover:bg-slate-800 flex items-center justify-between ${
+                        language === l.code
+                          ? 'font-bold text-emerald-600 dark:text-emerald-400'
+                          : 'text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <span>{l.label}</span>
+                      {language === l.code && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                    </button>
+                  ))}
                 </div>
               </>
             )}
@@ -257,7 +251,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                       className="w-full text-left px-3.5 py-2 text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
                     >
                       <LayoutDashboard className="w-4 h-4 text-emerald-600" />
-                      <span>My Dashboard</span>
+                      <span>{getRoleDashboardLabel(user.role)}</span>
+                    </Link>
+
+                    <Link
+                      to="/cart"
+                      onClick={() => setRoleMenuOpen(false)}
+                      className="w-full text-left px-3.5 py-2 text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+                    >
+                      <ShoppingCart className="w-4 h-4 text-emerald-600" />
+                      <span>My Cart ({totalItems})</span>
                     </Link>
 
                     <button
@@ -266,7 +269,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setRoleMenuOpen(false);
                         navigate('/');
                       }}
-                      className="w-full text-left px-3.5 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-2 font-medium"
+                      className="w-full text-left px-3.5 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-2 font-medium border-t border-slate-100 dark:border-slate-800 mt-1"
                     >
                       <LogOut className="w-4 h-4" />
                       <span>Sign Out</span>
@@ -278,11 +281,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           ) : (
             <button
               onClick={onOpenAuth}
-              className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-forest hover:bg-forest-light text-white text-xs font-semibold shadow-md shadow-forest/20 transition-all hover:scale-[1.02] shrink-0"
+              className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-forest hover:bg-forest-light text-white text-xs font-bold shadow-md shadow-forest/20 transition-all hover:scale-[1.02] active:scale-95 shrink-0"
             >
               <UserIcon className="w-3.5 h-3.5" />
-              <span className="hidden xs:inline">{t('navSignIn')}</span>
-              <span className="xs:hidden">Login</span>
+              <span>Get Started</span>
             </button>
           )}
 
@@ -305,7 +307,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => setMobileMenuOpen(false)}
             className="flex items-center gap-2.5 p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-slate-800"
           >
-            <Sprout className="w-4 h-4 text-emerald-600" />
+            <Store className="w-4 h-4 text-emerald-600" />
             <span>{t('navMarketplace')}</span>
           </Link>
           <Link
@@ -321,31 +323,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => setMobileMenuOpen(false)}
             className="flex items-center gap-2.5 p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-slate-800"
           >
-            <LayoutDashboard className="w-4 h-4 text-emerald-600" />
+            <Sprout className="w-4 h-4 text-emerald-600" />
             <span>{t('navForFarmers')}</span>
           </Link>
-          {user?.role === 'logistics' && (
+
+          {user && (
             <Link
-              to="/logistics/dashboard"
+              to={getDashboardRoute(user.role)}
               onClick={() => setMobileMenuOpen(false)}
               className="flex items-center gap-2.5 p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-slate-800"
             >
-              <Truck className="w-4 h-4 text-emerald-600" />
-              <span>{t('navLogistics')}</span>
-            </Link>
-          )}
-          {user?.role === 'admin' && (
-            <Link
-              to="/admin/dashboard"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex items-center gap-2.5 p-2 rounded-xl text-purple-600 dark:text-purple-400 hover:bg-purple-50"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>{t('navAdmin')}</span>
+              <LayoutDashboard className="w-4 h-4 text-emerald-600" />
+              <span>{getRoleDashboardLabel(user.role)}</span>
             </Link>
           )}
 
-          {user && (
+          {user ? (
             <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800">
               <button
                 onClick={() => {
@@ -357,6 +350,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <LogOut className="w-4 h-4 text-red-500" />
                 <span>Sign Out ({user.name})</span>
+              </button>
+            </div>
+          ) : (
+            <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800">
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenAuth();
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-forest text-white font-bold flex items-center justify-center gap-2"
+              >
+                <UserIcon className="w-4 h-4" />
+                <span>Get Started</span>
               </button>
             </div>
           )}

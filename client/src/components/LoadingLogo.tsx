@@ -40,14 +40,9 @@ export const LoadingLogo: React.FC<{ minDisplayTimeMs?: number }> = ({ minDispla
 
         {/* Brand Name & Tagline */}
         <div className="space-y-1.5">
-          <div className="flex items-center justify-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-forest dark:text-emerald-400">
-              AgriConnect
-            </h1>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-              Real-Time
-            </span>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-forest dark:text-emerald-400">
+            AgriConnect
+          </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium tracking-wide">
             From Farm to Every Table
           </p>
