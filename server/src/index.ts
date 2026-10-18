@@ -65,6 +65,15 @@ app.get('/api/health', (_req, res) => {
     razorpay: process.env.RAZORPAY_KEY_ID ? 'Configured (Test Mode)' : 'Unconfigured',
   });
 });
+// Root endpoint – simple health/info response
+app.get('/', (_req, res) => {
+  res.json({
+    message: "Welcome to AgriConnect API",
+    status: "ok",
+    version: "1.0.0",
+    realtime: "Socket.IO active",
+  });
+});
 
 // Mount API Routes
 app.use('/api/auth', authRoutes);
