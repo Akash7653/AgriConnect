@@ -50,7 +50,7 @@ export const CropCard: React.FC<CropCardProps> = ({ crop, onSelect }) => {
   return (
     <div
       onClick={() => onSelect(crop)}
-      className="group relative bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-subtle hover:shadow-premium hover:-translate-y-1 transition-all duration-300 cursor-pointer overflow-hidden flex flex-col justify-between"
+      className="group relative bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-subtle hover:shadow-premium hover:-translate-y-1.5 transition-all duration-300 cursor-pointer overflow-hidden flex flex-col justify-between tap-bounce"
     >
       <div>
         {/* Produce Image & Badges */}

@@ -104,28 +104,28 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose 
       : ["What are today's commodity price benchmarks?", 'How to protect tomato crops from leaf spot?', 'Which crops have the highest buyer demand this week?'];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl h-[650px] shadow-2xl flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl w-full max-w-2xl h-[92dvh] sm:h-[650px] shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-forest to-agri-800 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-sm">
-              <Sparkles className="w-5 h-5 text-emerald-300 animate-pulse" />
+        <div className="p-3.5 sm:p-4 bg-gradient-to-r from-forest to-agri-800 text-white flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-sm shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-300 animate-pulse" />
             </div>
-            <div>
-              <h3 className="font-bold text-base flex items-center gap-2">
-                <span>AgriConnect AI Co-Pilot</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
-                  Multilingual 2026
+            <div className="min-w-0">
+              <h3 className="font-bold text-sm sm:text-base flex items-center gap-1.5 truncate">
+                <span>AgriConnect AI</span>
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 hidden xs:inline">
+                  Multilingual
                 </span>
               </h3>
-              <p className="text-xs text-slate-300">Agricultural Agronomy & Market Intelligence</p>
+              <p className="text-[10px] sm:text-xs text-slate-300 truncate">Agronomy & Market Intelligence</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             {/* Language Pill */}
-            <div className="flex bg-black/20 p-1 rounded-lg text-xs font-semibold">
+            <div className="flex bg-black/20 p-0.5 rounded-lg text-[10px] sm:text-xs font-semibold">
               <button
                 onClick={() => setLanguage('en')}
                 className={`px-2 py-0.5 rounded ${language === 'en' ? 'bg-emerald-500 text-white' : 'text-slate-300'}`}
@@ -230,7 +230,7 @@ export const AIAdvisorModal: React.FC<AIAdvisorModalProps> = ({ isOpen, onClose 
         </div>
 
         {/* Input Bar */}
-        <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div className="p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
           <form
             onSubmit={(e) => {
               e.preventDefault();
