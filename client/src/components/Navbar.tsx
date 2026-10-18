@@ -75,7 +75,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, onOpenAI }) => {
   };
 
   return (
-    <header className="sticky top-0 z-40 w-full max-w-full overflow-visible border-b border-slate-200/60 dark:border-slate-800/80 liquid-glass transition-all">
+    <header className="fixed top-0 z-40 w-full max-w-full overflow-visible border-b border-slate-200/60 dark:border-slate-800/80 liquid-glass transition-all">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 w-full">
         {/* Left Section: Brand Logo */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
@@ -215,6 +215,16 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, onOpenAI }) => {
               </span>
             )}
           </Link>
+
+            {user && (
+              <button
+                onClick={() => { logout(); navigate('/'); }}
+                className="lg:hidden p-2 rounded-xl text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
 
           {/* User Sign In / Profile Avatar */}
           {user ? (
