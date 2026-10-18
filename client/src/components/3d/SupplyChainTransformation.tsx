@@ -1,5 +1,5 @@
-import React, { useRef, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import React, { useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Float } from '@react-three/drei';
 import * as THREE from 'three';
 
@@ -9,7 +9,7 @@ const NetworkNode: React.FC<{
   label: string;
   iconText: string;
   active?: boolean;
-}> = ({ position, color, label, iconText, active = true }) => {
+}> = ({ position, color, active = true }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   useFrame((state) => {
@@ -63,66 +63,82 @@ const ConnectionBeam: React.FC<{
   return <primitive object={lineMesh} />;
 };
 
+const ResponsiveNetworkContent: React.FC<{ mode: 'traditional' | 'agriconnect' }> = ({ mode }) => {
+  const { viewport } = useThree();
+  const isAgri = mode === 'agriconnect';
+
+  // Responsively scale entire network width to fit inside mobile viewport
+  const scale = Math.min(1.0, Math.max(0.48, (viewport.width * 0.92) / 8.2));
+
+  return (
+    <group scale={scale}>
+      {isAgri ? (
+        /* --- AGRICONNECT ONE NETWORK (Connected Direct) --- */
+        <group>
+          {/* Central Farm Producer Hub */}
+          <NetworkNode
+            position={[-3, 0, 0]}
+            color="#10b981"
+            label="Verified Farmers & FPOs"
+            iconText="🌾"
+          />
+
+          {/* Direct Connected Buyer Nodes */}
+          <NetworkNode position={[2.8, 1.6, 0]} color="#38bdf8" label="Households" iconText="🏠" />
+          <NetworkNode position={[3.2, 0, 0]} color="#a855f7" label="Restaurants & Hotels" iconText="🍽️" />
+          <NetworkNode position={[2.8, -1.6, 0]} color="#f59e0b" label="Supermarkets & Retail" iconText="🏬" />
+          <NetworkNode position={[0, -1.8, 0.5]} color="#14b8a6" label="Cold-Chain Logistics" iconText="🚚" />
+
+          {/* Glowing Direct Connection Lines */}
+          <ConnectionBeam start={[-3, 0, 0]} end={[2.8, 1.6, 0]} color="#10b981" />
+          <ConnectionBeam start={[-3, 0, 0]} end={[3.2, 0, 0]} color="#10b981" />
+          <ConnectionBeam start={[-3, 0, 0]} end={[2.8, -1.6, 0]} color="#10b981" />
+          <ConnectionBeam start={[-3, 0, 0]} end={[0, -1.8, 0.5]} color="#14b8a6" />
+          <ConnectionBeam start={[0, -1.8, 0.5]} end={[2.8, 1.6, 0]} color="#14b8a6" />
+          <ConnectionBeam start={[0, -1.8, 0.5]} end={[3.2, 0, 0]} color="#14b8a6" />
+        </group>
+      ) : (
+        /* --- TRADITIONAL FRAGMENTED MANDI CHAIN (Disconnected, 5 Intermediaries) --- */
+        <group>
+          <NetworkNode position={[-3.6, 0, 0]} color="#94a3b8" label="Farmer (33% value)" iconText="🌾" active={false} />
+          <NetworkNode position={[-2.0, 0.8, -0.5]} color="#f87171" label="Village Middleman" iconText="⚠️" active={false} />
+          <NetworkNode position={[-0.4, -0.6, 0.2]} color="#f87171" label="Commission Agent" iconText="⚠️" active={false} />
+          <NetworkNode position={[1.2, 0.9, -0.4]} color="#f87171" label="Wholesale Mandi" iconText="⚠️" active={false} />
+          <NetworkNode position={[2.6, -0.5, 0.3]} color="#f87171" label="Local Retailer (+150% markup)" iconText="⚠️" active={false} />
+          <NetworkNode position={[3.8, 0, 0]} color="#94a3b8" label="Consumer" iconText="🛒" active={false} />
+
+          {/* Fragmented, thin, broken links */}
+          <ConnectionBeam start={[-3.6, 0, 0]} end={[-2.0, 0.8, -0.5]} color="#ef4444" broken />
+          <ConnectionBeam start={[-2.0, 0.8, -0.5]} end={[-0.4, -0.6, 0.2]} color="#ef4444" broken />
+          <ConnectionBeam start={[-0.4, -0.6, 0.2]} end={[1.2, 0.9, -0.4]} color="#ef4444" broken />
+          <ConnectionBeam start={[1.2, 0.9, -0.4]} end={[2.6, -0.5, 0.3]} color="#ef4444" broken />
+          <ConnectionBeam start={[2.6, -0.5, 0.3]} end={[3.8, 0, 0]} color="#ef4444" broken />
+        </group>
+      )}
+    </group>
+  );
+};
+
 export const SupplyChainTransformationScene: React.FC<{ mode: 'traditional' | 'agriconnect' }> = ({
   mode,
 }) => {
   const isAgri = mode === 'agriconnect';
 
   return (
-    <Canvas
-      camera={{ position: [0, 1.2, 7.5], fov: 45 }}
-      style={{ height: '360px', width: '100%' }}
-      gl={{ antialias: true, alpha: true }}
-    >
-      <ambientLight intensity={0.8} />
-      <directionalLight position={[5, 8, 5]} intensity={1.5} color="#ffffff" />
-      <pointLight position={[-4, -2, 2]} intensity={0.6} color={isAgri ? '#10b981' : '#f87171'} />
+    <div className="w-full h-[320px] sm:h-[380px] relative">
+      <Canvas
+        camera={{ position: [0, 0.8, 9.2], fov: 45 }}
+        style={{ height: '100%', width: '100%' }}
+        gl={{ antialias: true, alpha: true }}
+      >
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[5, 8, 5]} intensity={1.5} color="#ffffff" />
+        <pointLight position={[-4, -2, 2]} intensity={0.6} color={isAgri ? '#10b981' : '#f87171'} />
 
-      <Float speed={2} rotationIntensity={0.2} floatIntensity={0.4}>
-        {isAgri ? (
-          /* --- AGRICONNECT ONE NETWORK (Connected Direct) --- */
-          <group>
-            {/* Central Farm Producer Hub */}
-            <NetworkNode
-              position={[-3, 0, 0]}
-              color="#10b981"
-              label="Verified Farmers & FPOs"
-              iconText="🌾"
-            />
-
-            {/* Direct Connected Buyer Nodes */}
-            <NetworkNode position={[2.8, 1.6, 0]} color="#38bdf8" label="Households" iconText="🏠" />
-            <NetworkNode position={[3.2, 0, 0]} color="#a855f7" label="Restaurants & Hotels" iconText="🍽️" />
-            <NetworkNode position={[2.8, -1.6, 0]} color="#f59e0b" label="Supermarkets & Retail" iconText="🏬" />
-            <NetworkNode position={[0, -1.8, 0.5]} color="#14b8a6" label="Cold-Chain Logistics" iconText="🚚" />
-
-            {/* Glowing Direct Connection Lines */}
-            <ConnectionBeam start={[-3, 0, 0]} end={[2.8, 1.6, 0]} color="#10b981" />
-            <ConnectionBeam start={[-3, 0, 0]} end={[3.2, 0, 0]} color="#10b981" />
-            <ConnectionBeam start={[-3, 0, 0]} end={[2.8, -1.6, 0]} color="#10b981" />
-            <ConnectionBeam start={[-3, 0, 0]} end={[0, -1.8, 0.5]} color="#14b8a6" />
-            <ConnectionBeam start={[0, -1.8, 0.5]} end={[2.8, 1.6, 0]} color="#14b8a6" />
-            <ConnectionBeam start={[0, -1.8, 0.5]} end={[3.2, 0, 0]} color="#14b8a6" />
-          </group>
-        ) : (
-          /* --- TRADITIONAL FRAGMENTED MANDI CHAIN (Disconnected, 5 Intermediaries) --- */
-          <group>
-            <NetworkNode position={[-3.6, 0, 0]} color="#94a3b8" label="Farmer (33% value)" iconText="🌾" active={false} />
-            <NetworkNode position={[-2.0, 0.8, -0.5]} color="#f87171" label="Village Middleman" iconText="⚠️" active={false} />
-            <NetworkNode position={[-0.4, -0.6, 0.2]} color="#f87171" label="Commission Agent" iconText="⚠️" active={false} />
-            <NetworkNode position={[1.2, 0.9, -0.4]} color="#f87171" label="Wholesale Mandi" iconText="⚠️" active={false} />
-            <NetworkNode position={[2.6, -0.5, 0.3]} color="#f87171" label="Local Retailer (+150% markup)" iconText="⚠️" active={false} />
-            <NetworkNode position={[3.8, 0, 0]} color="#94a3b8" label="Consumer" iconText="🛒" active={false} />
-
-            {/* Fragmented, thin, broken links */}
-            <ConnectionBeam start={[-3.6, 0, 0]} end={[-2.0, 0.8, -0.5]} color="#ef4444" broken />
-            <ConnectionBeam start={[-2.0, 0.8, -0.5]} end={[-0.4, -0.6, 0.2]} color="#ef4444" broken />
-            <ConnectionBeam start={[-0.4, -0.6, 0.2]} end={[1.2, 0.9, -0.4]} color="#ef4444" broken />
-            <ConnectionBeam start={[1.2, 0.9, -0.4]} end={[2.6, -0.5, 0.3]} color="#ef4444" broken />
-            <ConnectionBeam start={[2.6, -0.5, 0.3]} end={[3.8, 0, 0]} color="#ef4444" broken />
-          </group>
-        )}
-      </Float>
-    </Canvas>
+        <Float speed={2} rotationIntensity={0.2} floatIntensity={0.4}>
+          <ResponsiveNetworkContent mode={mode} />
+        </Float>
+      </Canvas>
+    </div>
   );
 };

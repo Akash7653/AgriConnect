@@ -30,14 +30,14 @@ interface NavbarProps {
   onOpenAuth: () => void;
   onOpenAI: () => void;
   onToggleSidebar?: () => void;
-  sidebarCollapsed?: boolean;
+  sidebarOpen?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   onOpenAI,
   onToggleSidebar,
-  sidebarCollapsed,
+  sidebarOpen = true,
 }) => {
   const { user, logout } = useAuth();
   const { language, setLanguage, t } = useLanguage();
@@ -74,12 +74,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onToggleSidebar}
               className="hidden md:flex p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              title={sidebarCollapsed ? 'Expand Sidenav' : 'Collapse Sidenav'}
+              title={sidebarOpen ? 'Hide Sidebar' : 'Show Sidebar'}
             >
-              {sidebarCollapsed ? (
-                <PanelLeftOpen className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-              ) : (
+              {sidebarOpen ? (
                 <PanelLeftClose className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+              ) : (
+                <PanelLeftOpen className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
               )}
             </button>
           )}
@@ -102,34 +102,24 @@ export const Navbar: React.FC<NavbarProps> = ({
           </Link>
         </div>
 
-        {/* Desktop Nav Links (Visible on screens >= 1024px) */}
-        <nav className="hidden lg:flex items-center gap-3 xl:gap-6 text-xs xl:text-sm font-semibold text-slate-700 dark:text-slate-200">
-          <Link to="/marketplace" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition">
-            {t('navMarketplace')}
-          </Link>
-          <Link
-            to="/b2b/procurement"
-            className="flex items-center gap-1 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
-          >
-            <Building2 className="w-4 h-4 text-emerald-600" />
-            <span>{t('navB2B')}</span>
-          </Link>
-          <Link to="/farmer/dashboard" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition">
-            {t('navForFarmers')}
-          </Link>
-          {user?.role === 'logistics' && (
-            <Link to="/logistics/dashboard" className="flex items-center gap-1 hover:text-emerald-600">
-              <Truck className="w-4 h-4" />
-              <span>{t('navLogistics')}</span>
+        {/* Desktop Nav Links (Visible only for non-logged in guests, since Sidenav handles navigation when logged in) */}
+        {!user && (
+          <nav className="hidden lg:flex items-center gap-3 xl:gap-6 text-xs xl:text-sm font-semibold text-slate-700 dark:text-slate-200">
+            <Link to="/marketplace" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition">
+              {t('navMarketplace')}
             </Link>
-          )}
-          {user?.role === 'admin' && (
-            <Link to="/admin/dashboard" className="flex items-center gap-1 text-purple-600 dark:text-purple-400 font-semibold">
-              <ShieldCheck className="w-4 h-4" />
-              <span>{t('navAdmin')}</span>
+            <Link
+              to="/b2b/procurement"
+              className="flex items-center gap-1 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
+            >
+              <Building2 className="w-4 h-4 text-emerald-600" />
+              <span>{t('navB2B')}</span>
             </Link>
-          )}
-        </nav>
+            <Link to="/farmer/dashboard" className="hover:text-emerald-600 dark:hover:text-emerald-400 transition">
+              {t('navForFarmers')}
+            </Link>
+          </nav>
+        )}
 
         {/* Right Action Icons */}
         <div className="flex items-center gap-1 sm:gap-2.5 shrink-0">
@@ -353,6 +343,22 @@ export const Navbar: React.FC<NavbarProps> = ({
               <ShieldCheck className="w-4 h-4" />
               <span>{t('navAdmin')}</span>
             </Link>
+          )}
+
+          {user && (
+            <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800">
+              <button
+                onClick={() => {
+                  logout();
+                  setMobileMenuOpen(false);
+                  navigate('/');
+                }}
+                className="w-full flex items-center gap-2.5 p-2 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-semibold"
+              >
+                <LogOut className="w-4 h-4 text-red-500" />
+                <span>Sign Out ({user.name})</span>
+              </button>
+            </div>
           )}
         </div>
       )}

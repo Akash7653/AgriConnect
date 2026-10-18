@@ -303,7 +303,7 @@ export async function seedDatabase(): Promise<void> {
       pricePerUnitPaise: 3800, // ₹38.00 / kg
       unit: 'kg',
       availableQuantity: 450,
-      minOrderQuantity: 2,
+      minOrderQuantity: 1,
       harvestDate: new Date(),
       expectedShelfLifeDays: 7,
       location: profileF1.location,
@@ -323,7 +323,7 @@ export async function seedDatabase(): Promise<void> {
       pricePerUnitPaise: 3200, // ₹32.00 / kg
       unit: 'kg',
       availableQuantity: 1200,
-      minOrderQuantity: 5,
+      minOrderQuantity: 1,
       harvestDate: new Date(Date.now() - 2 * 86400000),
       expectedShelfLifeDays: 45,
       location: profileF2.location,
@@ -343,7 +343,7 @@ export async function seedDatabase(): Promise<void> {
       pricePerUnitPaise: 6400, // ₹64.00 / kg
       unit: 'kg',
       availableQuantity: 2500,
-      minOrderQuantity: 10,
+      minOrderQuantity: 1,
       harvestDate: new Date(Date.now() - 30 * 86400000),
       expectedShelfLifeDays: 365,
       location: profileF3.location,
@@ -403,7 +403,7 @@ export async function seedDatabase(): Promise<void> {
       pricePerUnitPaise: 2500, // ₹25.00 / bunch
       unit: 'bunch',
       availableQuantity: 150,
-      minOrderQuantity: 2,
+      minOrderQuantity: 1,
       harvestDate: new Date(),
       expectedShelfLifeDays: 3,
       location: profileF3.location,

@@ -18,32 +18,36 @@ interface CropCardProps {
 
 export const CropCard: React.FC<CropCardProps> = ({ crop, onSelect }) => {
   const { addToCart } = useCart();
-  const [quantity, setQuantity] = useState(crop.minOrderQuantity || 1);
+  const [quantity, setQuantity] = useState(0);
   const [added, setAdded] = useState(false);
 
   const priceRupees = (crop.pricePerUnitPaise / 100).toFixed(2);
   const farmerPayoutRupees = ((crop.pricePerUnitPaise * 0.9) / 100).toFixed(2);
   const isAvailable = crop.availableQuantity > 0 && crop.status === 'active';
 
-  const handleAdd = (e: React.MouseEvent) => {
+  const handleAddInitial = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!isAvailable) return;
-    addToCart(crop, quantity);
+    setQuantity(1);
+    addToCart(crop, 1);
     setAdded(true);
-    setTimeout(() => setAdded(false), 1500);
+    setTimeout(() => setAdded(false), 1200);
   };
 
   const handleIncrement = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (quantity < crop.availableQuantity) {
       setQuantity((q) => q + 1);
+      addToCart(crop, 1);
     }
   };
 
   const handleDecrement = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (quantity > (crop.minOrderQuantity || 1)) {
+    if (quantity > 1) {
       setQuantity((q) => q - 1);
+    } else if (quantity === 1) {
+      setQuantity(0);
     }
   };
 
@@ -171,53 +175,50 @@ export const CropCard: React.FC<CropCardProps> = ({ crop, onSelect }) => {
         </div>
 
         {isAvailable ? (
-          <div className="flex items-center gap-2">
-            {/* Quantity Stepper */}
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="flex items-center border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 p-0.5"
-            >
-              <button
-                onClick={handleDecrement}
-                disabled={quantity <= (crop.minOrderQuantity || 1)}
-                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40 transition"
-              >
-                <Minus className="w-3.5 h-3.5" />
-              </button>
-              <span className="w-8 text-center text-xs font-bold text-slate-800 dark:text-slate-100">
-                {quantity}
-              </span>
-              <button
-                onClick={handleIncrement}
-                disabled={quantity >= crop.availableQuantity}
-                className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40 transition"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Add to Cart Button */}
+          quantity === 0 ? (
             <button
-              onClick={handleAdd}
-              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm ${
-                added
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-agri-700 hover:bg-agri-800 text-white hover:shadow-md'
-              }`}
+              onClick={handleAddInitial}
+              className="w-full py-2.5 px-3 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5 shadow-sm transition hover:scale-[1.02] active:scale-95"
             >
-              {added ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Added!</span>
-                </>
-              ) : (
-                <>
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add to Cart</span>
-                </>
-              )}
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add to Cart</span>
             </button>
-          </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              {/* Quantity Stepper */}
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center border border-emerald-500/40 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/40 p-0.5"
+              >
+                <button
+                  onClick={handleDecrement}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-300 font-bold transition"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <span className="w-8 text-center text-xs font-bold text-emerald-800 dark:text-emerald-200">
+                  {quantity}
+                </span>
+                <button
+                  onClick={handleIncrement}
+                  disabled={quantity >= crop.availableQuantity}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-300 font-bold transition disabled:opacity-40"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelect(crop);
+                }}
+                className="flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100/70 dark:bg-emerald-950/60 text-center"
+              >
+                {added ? 'Added!' : `${quantity} in Cart`}
+              </div>
+            </div>
+          )
         ) : (
           <button
             disabled

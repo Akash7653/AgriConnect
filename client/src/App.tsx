@@ -24,7 +24,7 @@ export const App: React.FC = () => {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authDefaultRole, setAuthDefaultRole] = useState<UserRole>('buyer');
   const [aiModalOpen, setAiModalOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const handleOpenAuth = (role?: UserRole) => {
     if (role) setAuthDefaultRole(role);
@@ -40,21 +40,20 @@ export const App: React.FC = () => {
         {/* Global Living 3D Atmospheric Background */}
         <AtmosphericBackgroundCanvas />
 
-        {/* Desktop Side Navigation Bar (Displayed only after login, with collapse button) */}
-        {user && (
+        {/* Desktop Side Navigation Bar (Displayed only after login, disappears when toggled) */}
+        {user && sidebarOpen && (
           <Sidebar
             onOpenAI={() => setAiModalOpen(true)}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+            onClose={() => setSidebarOpen(false)}
           />
         )}
 
-        <div className={`flex-1 flex flex-col transition-all duration-300 ${user ? (sidebarCollapsed ? 'md:pl-20' : 'md:pl-64') : ''}`}>
+        <div className={`flex-1 flex flex-col transition-all duration-300 ${user && sidebarOpen ? 'md:pl-64' : 'md:pl-0'}`}>
           <Navbar
             onOpenAuth={() => handleOpenAuth('buyer')}
             onOpenAI={() => setAiModalOpen(true)}
-            onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+            sidebarOpen={sidebarOpen}
           />
 
           <main className="flex-1 pb-20 md:pb-0">

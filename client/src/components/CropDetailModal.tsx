@@ -24,7 +24,7 @@ export const CropDetailModal: React.FC<CropDetailModalProps> = ({ crop, onClose 
   if (!crop) return null;
 
   const { addToCart } = useCart();
-  const [quantity, setQuantity] = useState(crop.minOrderQuantity || 1);
+  const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
 
   const priceRupees = (crop.pricePerUnitPaise / 100).toFixed(2);
@@ -190,8 +190,8 @@ export const CropDetailModal: React.FC<CropDetailModalProps> = ({ crop, onClose 
             {isAvailable && (
               <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 p-1">
                 <button
-                  onClick={() => setQuantity((q) => Math.max(crop.minOrderQuantity || 1, q - 1))}
-                  disabled={quantity <= (crop.minOrderQuantity || 1)}
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  disabled={quantity <= 1}
                   className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-40"
                 >
                   <Minus className="w-4 h-4" />
