@@ -5,7 +5,8 @@ let socket: Socket | null = null;
 export function getSocket(): Socket {
   if (!socket) {
     const token = localStorage.getItem('agriconnect_token');
-    socket = io(window.location.origin, {
+    const baseUrl = import.meta.env.VITE_API_URL || window.location.origin;
+    socket = io(baseUrl, {
       auth: { token },
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
