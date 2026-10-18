@@ -11,6 +11,12 @@ export default defineConfig({
     },
   },
   server: {
+    // Proxy configuration remains unchanged
+  },
+  // Define VITE environment variables for the frontend
+  define: {
+    'import.meta.env.VITE_API_URL': JSON.stringify('https://agriconnect-api-ajoq.onrender.com'),
+  }
     port: 3000,
     proxy: {
       '/api': {
