@@ -109,7 +109,7 @@ export function MarketplacePage() {
             </div>
             <button
               onClick={() => setCartOpen(true)}
-              className="relative inline-flex self-start items-center gap-2 bg-forest px-5 py-3 text-ivory rounded-full hover:bg-agri-emerald hover:text-forest transition-colors sm:self-auto"
+              className="relative hidden self-start items-center gap-2 rounded-full bg-forest px-5 py-3 text-ivory transition-colors hover:bg-agri-emerald hover:text-forest sm:inline-flex sm:self-auto"
             >
               <ShoppingCart className="h-4 w-4" />
               Cart
@@ -174,6 +174,19 @@ export function MarketplacePage() {
           )}
         </div>
       </div>
+
+      <button
+        onClick={() => setCartOpen(true)}
+        className="fixed bottom-24 right-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-forest text-ivory shadow-cinematic transition-colors hover:bg-agri-emerald hover:text-forest sm:hidden"
+        aria-label="Open cart"
+      >
+        <ShoppingCart className="h-5 w-5" />
+        {totalItems > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-agri-emerald text-xs font-bold text-forest">
+            {totalItems}
+          </span>
+        )}
+      </button>
 
       <CartDrawer
         open={cartOpen}

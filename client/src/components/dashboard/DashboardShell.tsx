@@ -210,7 +210,7 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
                     classNames(
                       'flex min-w-0 w-full flex-col items-center gap-1 rounded-xl py-2 text-center text-[10px] font-medium uppercase leading-tight tracking-wide transition-colors',
                       item.label === 'Marketplace' ? 'px-3' : 'px-1',
-                      isActive ? 'bg-forest text-ivory' : 'text-charcoal/55 hover:bg-forest/5 hover:text-forest'
+                      isActive ? 'm-0.5 bg-forest text-ivory' : 'text-charcoal/55 hover:bg-forest/5 hover:text-forest'
                     ),
                   )
                 }
