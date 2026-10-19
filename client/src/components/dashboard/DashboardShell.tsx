@@ -216,7 +216,10 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
                 }
               >
                 <item.icon className="h-4 w-4" strokeWidth={1.7} />
-                <span className="flex min-h-[24px] items-center justify-center">{item.label}</span>
+                <span className={classNames(
+                  'flex min-h-[24px] items-center justify-center',
+                  item.label === 'Marketplace' ? 'px-1.5' : ''
+                )}>{item.label}</span>
               </NavLink>
             ))}
             <button

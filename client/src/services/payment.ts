@@ -62,22 +62,24 @@ export function playPaymentSuccessSound() {
   if (!AudioContextConstructor) return;
 
   const context = new AudioContextConstructor();
-  const gain = context.createGain();
-  gain.gain.setValueAtTime(0.0001, context.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.55);
-  gain.connect(context.destination);
+  void context.resume().then(() => {
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.55);
+    gain.connect(context.destination);
 
-  [659.25, 783.99].forEach((frequency, index) => {
-    const oscillator = context.createOscillator();
-    oscillator.type = 'sine';
-    oscillator.frequency.value = frequency;
-    oscillator.connect(gain);
-    oscillator.start(context.currentTime + index * 0.12);
-    oscillator.stop(context.currentTime + 0.55);
+    [659.25, 783.99].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = frequency;
+      oscillator.connect(gain);
+      oscillator.start(context.currentTime + index * 0.12);
+      oscillator.stop(context.currentTime + 0.55);
+    });
+
+    window.setTimeout(() => void context.close(), 700);
   });
-
-  window.setTimeout(() => void context.close(), 700);
 }
 
 async function loadRazorpay(): Promise<RazorpayConstructor> {
