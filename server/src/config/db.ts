@@ -6,31 +6,42 @@ let mongoMemoryServer: MongoMemoryServer | null = null;
 export async function connectDB(): Promise<string> {
   const customUri = process.env.MONGODB_URI;
 
+  // If a URI is provided, attempt to connect to MongoDB Atlas
   if (customUri) {
     try {
-      console.log('Connecting to provided MONGODB_URI (e.g. MongoDB Atlas)...');
+      console.log('Connecting to provided MONGODB_URI (MongoDB Atlas)...');
       await mongoose.connect(customUri, {
         serverSelectionTimeoutMS: 5000,
       });
-      console.log('Connected successfully to MongoDB Atlas / Remote Cluster.');
+      console.log('✅ Connected to MongoDB Atlas successfully.');
       return customUri;
     } catch (err: any) {
-      console.warn('Could not connect to external MONGODB_URI:', err.message);
-      console.log('Falling back to local high-performance in-memory MongoDB instance for development & testing...');
+      console.error('❌ Failed to connect to MongoDB Atlas:', err.message);
+      // Fall back to in‑memory DB for development after a failed Atlas connection
     }
   }
 
-  // Fallback to MongoMemoryServer for instant local run without external dependencies
-  try {
-    mongoMemoryServer = await MongoMemoryServer.create();
-    const uri = mongoMemoryServer.getUri();
-    await mongoose.connect(uri);
-    console.log(`Connected to in-memory MongoDB at ${uri} (Zero external setup required)`);
-    return uri;
-  } catch (err: any) {
-    console.error('Fatal: Failed to start database connection:', err);
-    throw err;
-  }
+  // No URI set or Atlas connection failed – use in‑memory MongoDB (useful for local dev/testing)
+  console.log('⚡ Starting in‑memory MongoDB instance for development');
+  mongoMemoryServer = await MongoMemoryServer.create();
+  const uri = mongoMemoryServer.getUri();
+  await mongoose.connect(uri, {
+    serverSelectionTimeoutMS: 5000,
+  });
+  console.log('✅ Connected to in‑memory MongoDB.');
+  return uri;
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 export async function disconnectDB(): Promise<void> {

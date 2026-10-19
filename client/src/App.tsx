@@ -1,91 +1,49 @@
-import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Navbar } from './components/Navbar.js';
-import { Footer } from './components/Footer.js';
-import { MobileDownNav } from './components/MobileDownNav.js';
-import { LoadingLogo } from './components/LoadingLogo.js';
-import { AtmosphericBackgroundCanvas } from './components/3d/AtmosphericBackgroundCanvas.js';
-import { AIAdvisorModal } from './components/AIAdvisorModal.js';
-import { AuthModal } from './components/AuthModal.js';
-import { LandingPage } from './pages/LandingPage.js';
-import { MarketplacePage } from './pages/MarketplacePage.js';
-import { CartCheckoutPage } from './pages/CartCheckoutPage.js';
-import { FarmerDashboard } from './pages/FarmerDashboard.js';
-import { BuyerDashboard } from './pages/BuyerDashboard.js';
-import { B2BPortalPage } from './pages/B2BPortalPage.js';
-import { LogisticsDashboard } from './pages/LogisticsDashboard.js';
-import { AdminDashboard } from './pages/AdminDashboard.js';
-import { UserRole } from './types/index.js';
-import { useAuth } from './context/AuthContext.js';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
+import { Navbar } from '@/components/layout/Navbar';
+import { Footer } from '@/components/layout/Footer';
+import { AIntro } from '@/components/AIntro';
+import { LandingPage } from '@/pages/LandingPage';
+import { MarketplacePage } from '@/pages/MarketplacePage';
+import { LoginPage } from '@/pages/LoginPage';
+import { RegisterPage } from '@/pages/RegisterPage';
+import { DashboardRoute } from '@/pages/dashboard/DashboardRoute';
 
-export const App: React.FC = () => {
-  const { user } = useAuth();
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authDefaultRole, setAuthDefaultRole] = useState<UserRole>('buyer');
-  const [aiModalOpen, setAiModalOpen] = useState(false);
+function AppRoutes() {
+  const location = useLocation();
+  const isLanding = location.pathname === '/';
+  const isDashboard = location.pathname.startsWith('/dashboard');
+  const [showIntro, setShowIntro] = useState(false);
 
-  const handleOpenAuth = (role?: UserRole) => {
-    if (role) setAuthDefaultRole(role);
-    setAuthModalOpen(true);
-  };
+  useEffect(() => {
+    if (isLanding) {
+      setShowIntro(true);
+    }
+  }, [isLanding]);
 
   return (
-    <Router>
-      <div className="min-h-screen flex flex-col bg-cream-50/70 dark:bg-slate-950/80 text-slate-900 dark:text-slate-100 transition-colors relative overflow-x-hidden">
-        {/* Animated Loading Screen Logo */}
-        <LoadingLogo minDisplayTimeMs={700} />
-
-        {/* Global Living 3D Atmospheric Background */}
-        <AtmosphericBackgroundCanvas />
-
-        <div className="flex-1 flex flex-col w-full">
-          <Navbar
-            onOpenAuth={() => handleOpenAuth('buyer')}
-            onOpenAI={() => setAiModalOpen(true)}
-          />
-
-          <main className="flex-1 pb-20 md:pb-0">
-            <Routes>
-              <Route
-                path="/"
-                element={
-                  <LandingPage
-                    onOpenAuthWithRole={(role) => handleOpenAuth(role as UserRole)}
-                    onOpenAI={() => setAiModalOpen(true)}
-                  />
-                }
-              />
-              <Route path="/marketplace" element={<MarketplacePage />} />
-              <Route path="/cart" element={<CartCheckoutPage />} />
-              <Route path="/farmer/dashboard" element={<FarmerDashboard />} />
-              <Route path="/buyer/dashboard" element={<BuyerDashboard />} />
-              <Route path="/b2b/procurement" element={<B2BPortalPage />} />
-              <Route path="/logistics/dashboard" element={<LogisticsDashboard />} />
-              <Route path="/admin/dashboard" element={<AdminDashboard />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </main>
-
-          <Footer />
-        </div>
-
-        {/* Mobile Down-Nav (Fixed Bottom Navigation Bar) */}
-        <MobileDownNav onOpenAuth={() => handleOpenAuth('buyer')} />
-
-        {/* Global Floating Modals */}
-        <AuthModal
-          isOpen={authModalOpen}
-          onClose={() => setAuthModalOpen(false)}
-          defaultRole={authDefaultRole}
-        />
-
-        <AIAdvisorModal
-          isOpen={aiModalOpen}
-          onClose={() => setAiModalOpen(false)}
-        />
-      </div>
-    </Router>
+    <>
+      {showIntro && <AIntro onComplete={() => setShowIntro(false)} />}
+      {!['/login', '/register'].includes(location.pathname) && !isDashboard && <Navbar />}
+      <AnimatePresence mode="wait">
+        <Routes location={location}>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/dashboard/*" element={<DashboardRoute />} />
+          <Route path="*" element={<LandingPage />} />
+        </Routes>
+      </AnimatePresence>
+      {isLanding && <Footer />}
+    </>
   );
-};
+}
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
+  );
+}

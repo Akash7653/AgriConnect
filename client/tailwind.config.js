@@ -1,55 +1,66 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  darkMode: 'class',
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        agri: {
-          50: '#f0fdf4',
-          100: '#dcfce7',
-          200: '#bbf7d0',
-          300: '#86efac',
-          400: '#4ade80',
-          500: '#22c55e',
-          600: '#16a34a',
-          700: '#15803d',
-          800: '#166534',
-          900: '#14532d',
-          950: '#052e16',
-        },
         forest: {
-          light: '#2d6a4f',
-          DEFAULT: '#1b4332',
-          dark: '#081c15',
+          DEFAULT: '#163D2B',
+          50: '#EAF1ED',
+          100: '#C8D9CF',
+          200: '#9AB8A7',
+          300: '#6B967F',
+          400: '#3D7557',
+          500: '#246B45',
+          600: '#1E5A3A',
+          700: '#163D2B',
+          800: '#102B1F',
+          900: '#0A1B14',
         },
-        cream: {
-          50: '#fefdfb',
-          100: '#fdfbf7',
-          200: '#faf6ee',
-          300: '#f5eee1',
-          400: '#ebdcc5',
-          DEFAULT: '#faf8f5',
+        agri: {
+          green: '#246B45',
+          emerald: '#38A169',
         },
-        harvest: {
-          gold: '#e09f3e',
-          amber: '#d97706',
-          orange: '#ea580c',
-        }
+        ivory: {
+          DEFAULT: '#F7F5ED',
+          50: '#FDFCF8',
+          100: '#F7F5ED',
+          200: '#EFEAD9',
+          300: '#E0D9C2',
+        },
+        soil: {
+          DEFAULT: '#75533A',
+          light: '#9A7252',
+          dark: '#5A3E29',
+        },
+        charcoal: '#18231C',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-        display: ['Plus Jakarta Sans', 'Inter', 'sans-serif'],
+        display: ['"Fraunces"', 'Georgia', 'serif'],
+        sans: ['"Inter"', 'system-ui', 'sans-serif'],
       },
-      boxShadow: {
-        'subtle': '0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03)',
-        'premium': '0 10px 30px -10px rgba(15, 74, 43, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.03)',
-        'elevated': '0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04)',
-      }
+      letterSpacing: {
+        tightest: '-0.04em',
+        'ultra-wide': '0.25em',
+      },
+      maxWidth: {
+        '8xl': '88rem',
+        '9xl': '100rem',
+      },
+      keyframes: {
+        'fade-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        'draw-stroke': {
+          from: { strokeDashoffset: '1000' },
+          to: { strokeDashoffset: '0' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 0.8s ease-out forwards',
+      },
     },
   },
   plugins: [],
-}
+};

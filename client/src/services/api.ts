@@ -1,36 +1,110 @@
-import axios from 'axios';
+import { API_BASE_URL, AppConfig } from '@/config/app';
+import type { AuthSession, User, UserRole } from '@/types';
 
-const api = axios.create({
-  // Use VITE_API_URL when deployed; fallback to relative /api for local dev
-  baseURL: import.meta.env.VITE_API_URL || '/api',
-  headers: {
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status = 0) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+interface RequestOptions extends RequestInit {
+  token?: string;
+}
+
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { token, headers, ...rest } = options;
+  const url = `${API_BASE_URL}${path}`;
+  const mergedHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
-  },
-});
+    ...(headers as Record<string, string>),
+  };
+  if (token) mergedHeaders.Authorization = `Bearer ${token}`;
 
-// Attach JWT token from localStorage automatically
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('agriconnect_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Intercept 401 unauthenticated
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // Clear token if invalid
-      if (window.location.pathname.startsWith('/farmer') || window.location.pathname.startsWith('/admin')) {
-        // Only clear if on protected route
-        localStorage.removeItem('agriconnect_token');
-        localStorage.removeItem('agriconnect_user');
-      }
+  const res = await fetch(url, { ...rest, headers: mergedHeaders });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      const serverMessage = body.message;
+      message = typeof serverMessage === 'string' && serverMessage.trim().startsWith('[')
+        ? 'Please check your details and try again.'
+        : serverMessage ?? message;
+    } catch {
+      /* ignore */
     }
-    return Promise.reject(error);
+    throw new ApiError(message, res.status);
   }
-);
+  return (await res.json()) as T;
+}
 
-export default api;
+export const AuthService = {
+  isBackendConfigured: AppConfig.isBackendConfigured,
+
+  async login(email: string, password: string): Promise<AuthSession> {
+    if (!AppConfig.isBackendConfigured) {
+      throw new ApiError(
+        'Backend not configured. Authentication requires VITE_API_BASE_URL to be set.',
+        0
+      );
+    }
+    return request<AuthSession>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
+  async register(payload: {
+    fullName: string;
+    email: string;
+    password: string;
+    phone: string;
+    role: UserRole;
+  }): Promise<AuthSession> {
+    if (!AppConfig.isBackendConfigured) {
+      throw new ApiError(
+        'Backend not configured. Registration requires VITE_API_BASE_URL to be set.',
+        0
+      );
+    }
+    return request<AuthSession>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: payload.fullName,
+        email: payload.email,
+        password: payload.password,
+        phone: payload.phone,
+        role: payload.role,
+      }),
+    });
+  },
+
+  persistSession(session: AuthSession) {
+    localStorage.setItem('agriconnect_session', JSON.stringify(session));
+  },
+
+  loadSession(): AuthSession | null {
+    const raw = localStorage.getItem('agriconnect_session');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as AuthSession;
+    } catch {
+      return null;
+    }
+  },
+
+  clearSession() {
+    localStorage.removeItem('agriconnect_session');
+  },
+
+  mapUser(u: Partial<User> & { email: string }): User {
+    return {
+      id: u.id ?? 'unknown',
+      email: u.email,
+      fullName: u.fullName ?? '',
+      role: u.role ?? 'buyer',
+    };
+  },
+};
