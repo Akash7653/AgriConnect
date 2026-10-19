@@ -4,6 +4,7 @@ import { Eye, EyeOff, Lock, Mail, User, Loader2, Sprout, Store, Truck } from 'lu
 import { AuthLayout } from '@/components/auth/AuthLayout';
 import { Input } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/useToast';
 import type { UserRole } from '@/types';
 import { classNames } from '@/utils';
 
@@ -15,6 +16,7 @@ const roles: { value: UserRole; label: string; icon: typeof Sprout; desc: string
 
 export function RegisterPage() {
   const { signUp, isBackendConfigured } = useAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const initialRole = (params.get('role') as UserRole) ?? 'farmer';
@@ -58,9 +60,12 @@ export function RegisterPage() {
     setLoading(true);
     try {
       await signUp({ fullName, email, password, phone, role });
+      showToast('Your account was created successfully.', 'success');
       navigate('/dashboard');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed.');
+      const message = err instanceof Error ? err.message : 'Registration failed.';
+      setError(message);
+      showToast(message, 'error');
     } finally {
       setLoading(false);
     }

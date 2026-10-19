@@ -3,15 +3,22 @@ import { Link } from 'react-router-dom';
 import { Plus, Star, MapPin, Sprout } from 'lucide-react';
 import type { CropProduct } from '@/types';
 import { useCart } from '@/hooks/useCart';
+import { useToast } from '@/hooks/useToast';
 import { formatCurrency, classNames } from '@/utils';
 import { Badge } from '@/components/ui';
 
 export function ProductCard({ product, index }: { product: CropProduct; index: number }) {
   const { add } = useCart();
+  const { showToast } = useToast();
+
+  function addToCart() {
+    add(product, 1);
+    showToast(`${product.name} added to cart.`, 'success');
+  }
 
   return (
     <motion.article
-      className="group bg-white rounded-2xl overflow-hidden border border-forest/8 hover:border-forest/20 transition-all hover:shadow-cinematic flex flex-col"
+      className="group flex flex-col overflow-hidden rounded-xl border border-forest/8 bg-white transition-all hover:border-forest/20 hover:shadow-cinematic sm:rounded-2xl"
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
@@ -33,8 +40,8 @@ export function ProductCard({ product, index }: { product: CropProduct; index: n
         </div>
       </div>
 
-      <div className="p-5 flex flex-col flex-1">
-        <h3 className="font-display text-lg text-forest">{product.name}</h3>
+      <div className="flex flex-1 flex-col p-3 sm:p-5">
+        <h3 className="font-display text-base text-forest sm:text-lg">{product.name}</h3>
         <p className="text-sm text-charcoal/60 mt-1 flex items-center gap-1.5">
           <MapPin className="h-3.5 w-3.5" /> {product.origin}
         </p>
@@ -44,7 +51,7 @@ export function ProductCard({ product, index }: { product: CropProduct; index: n
 
         <div className="mt-4 flex items-end justify-between pt-4 border-t border-forest/8 mt-auto">
           <div>
-            <p className="font-display text-2xl text-forest">
+            <p className="font-display text-xl text-forest sm:text-2xl">
               {formatCurrency(product.pricePerUnit, product.currency)}
               <span className="text-sm text-charcoal/50 font-sans">/{product.unit}</span>
             </p>
@@ -58,8 +65,8 @@ export function ProductCard({ product, index }: { product: CropProduct; index: n
             </p>
           </div>
           <button
-            onClick={() => add(product, 1)}
-            className="h-10 w-10 rounded-full bg-forest text-ivory flex items-center justify-center hover:bg-agri-emerald hover:text-forest transition-colors"
+            onClick={addToCart}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest text-ivory transition-colors hover:bg-agri-emerald hover:text-forest sm:h-10 sm:w-10"
             aria-label={`Add ${product.name} to cart`}
           >
             <Plus className="h-5 w-5" />

@@ -4,9 +4,11 @@ import { Eye, EyeOff, Lock, Mail, Loader2 } from 'lucide-react';
 import { AuthLayout } from '@/components/auth/AuthLayout';
 import { Input } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/useToast';
 
 export function LoginPage() {
   const { signIn, isBackendConfigured } = useAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
@@ -31,9 +33,12 @@ export function LoginPage() {
     setLoading(true);
     try {
       await signIn(email, password);
+      showToast('Welcome back.', 'success');
       navigate(searchParams.get('redirect') || '/dashboard');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign in failed.');
+      const message = err instanceof Error ? err.message : 'Sign in failed.';
+      setError(message);
+      showToast(message, 'error');
     } finally {
       setLoading(false);
     }

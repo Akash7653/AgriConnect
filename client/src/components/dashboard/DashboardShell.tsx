@@ -3,6 +3,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Logo } from '@/components/Logo';
 import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/hooks/useToast';
 import { classNames } from '@/utils';
 import {
   Sprout,
@@ -66,6 +67,7 @@ interface DashboardShellProps {
 
 export function DashboardShell({ role, title, subtitle, children }: DashboardShellProps) {
   const { signOut } = useAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const nav = navByRole[role];
@@ -74,6 +76,7 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
 
   function handleSignOut() {
     signOut();
+    showToast('You have been signed out.', 'success');
     navigate('/');
   }
 
@@ -204,8 +207,11 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
                 end={item.to === '/dashboard'}
                 className={({ isActive }) =>
                   classNames(
-                    'flex min-w-0 w-full flex-col items-center gap-1 rounded-xl px-1 py-2 text-center text-[10px] font-medium uppercase leading-tight tracking-wide transition-colors',
-                    isActive ? 'bg-forest text-ivory' : 'text-charcoal/55 hover:bg-forest/5 hover:text-forest'
+                    classNames(
+                      'flex min-w-0 w-full flex-col items-center gap-1 rounded-xl py-2 text-center text-[10px] font-medium uppercase leading-tight tracking-wide transition-colors',
+                      item.label === 'Marketplace' ? 'px-3' : 'px-1',
+                      isActive ? 'bg-forest text-ivory' : 'text-charcoal/55 hover:bg-forest/5 hover:text-forest'
+                    ),
                   )
                 }
               >

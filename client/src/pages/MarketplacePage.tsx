@@ -5,6 +5,7 @@ import { Search, ShoppingCart, Trash2, Minus, Plus, X, ShoppingBag, Loader2, Che
 import { ProductCard } from '@/components/marketplace/ProductCard';
 import { ProductsService } from '@/services/products';
 import { useCart } from '@/hooks/useCart';
+import { useToast } from '@/hooks/useToast';
 import { useAuth } from '@/hooks/useAuth';
 import { PaymentService, playPaymentSuccessSound, type DeliveryAddress } from '@/services/payment';
 import type { CropProduct, ProductCategory } from '@/types';
@@ -31,6 +32,7 @@ export function MarketplacePage() {
   const [checkoutError, setCheckoutError] = useState('');
   const [successOrder, setSuccessOrder] = useState('');
   const { session, isAuthenticated } = useAuth();
+  const { showToast } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
   const { items, totalItems, totalAmount, remove, setQuantity, clear } = useCart();
@@ -62,11 +64,17 @@ export function MarketplacePage() {
           });
           playPaymentSuccessSound();
           setSuccessOrder(orderNumber);
+          showToast(`Order ${orderNumber} placed successfully.`, 'success');
         },
-        (message) => setCheckoutError(message)
+        (message) => {
+          setCheckoutError(message);
+          showToast(message, 'error');
+        }
       );
     } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : 'Could not start payment.');
+      const message = error instanceof Error ? error.message : 'Could not start payment.';
+      setCheckoutError(message);
+      showToast(message, 'error');
     } finally {
       setCheckoutBusy(false);
     }
@@ -101,7 +109,7 @@ export function MarketplacePage() {
             </div>
             <button
               onClick={() => setCartOpen(true)}
-              className="relative inline-flex items-center gap-2 bg-forest text-ivory px-5 py-3 rounded-full hover:bg-agri-emerald hover:text-forest transition-colors"
+              className="relative inline-flex self-start items-center gap-2 bg-forest px-5 py-3 text-ivory rounded-full hover:bg-agri-emerald hover:text-forest transition-colors sm:self-auto"
             >
               <ShoppingCart className="h-4 w-4" />
               Cart
@@ -123,7 +131,7 @@ export function MarketplacePage() {
                 className="w-full rounded-full border border-forest/15 bg-white/60 pl-11 pr-4 py-3 text-forest placeholder:text-charcoal/40 focus:outline-none focus:ring-2 focus:ring-agri-emerald"
               />
             </div>
-            <div className="flex min-w-0 max-w-full gap-2 overflow-x-auto pb-1">
+            <div className="flex min-w-0 max-w-full flex-wrap gap-2 pb-1">
               {categories.map((c) => (
                 <button
                   key={c.value}
@@ -158,7 +166,7 @@ export function MarketplacePage() {
             </div>
           )}
           {!loading && !error && products && products.length > 0 && (
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
               {products.map((p, i) => (
                 <ProductCard key={p.id} product={p} index={i} />
               ))}
@@ -174,7 +182,10 @@ export function MarketplacePage() {
         totalAmount={totalAmount}
         onRemove={remove}
         onSetQuantity={setQuantity}
-        onClear={clear}
+        onClear={() => {
+          clear();
+          showToast('Cart cleared.', 'info');
+        }}
         isAuthenticated={isAuthenticated}
         checkoutOpen={checkoutOpen}
         checkoutBusy={checkoutBusy}
