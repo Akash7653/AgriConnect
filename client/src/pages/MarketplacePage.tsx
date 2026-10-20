@@ -20,6 +20,9 @@ const categories: { value: ProductCategory | 'all'; label: string }[] = [
   { value: 'herbs', label: 'Herbs' },
 ];
 
+const DELIVERY_FEE = 40;
+const FREE_DELIVERY_THRESHOLD = 500;
+
 export function MarketplacePage() {
   const [products, setProducts] = useState<CropProduct[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -289,6 +292,8 @@ function CartDrawer({
   onPay,
   onBackToCart,
 }: CartDrawerProps) {
+  const deliveryFee = totalAmount >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
+  const payableAmount = totalAmount + deliveryFee;
   const [address, setAddress] = useState<DeliveryAddress>({
     recipientName: '',
     phone: '',
@@ -366,13 +371,24 @@ function CartDrawer({
                   ))}
                 </div>
                 {checkoutError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{checkoutError}</p>}
+                <div className="space-y-2 rounded-xl bg-white/70 p-4 text-sm">
+                  <div className="flex justify-between text-charcoal/60">
+                    <span>Produce subtotal</span><span>{formatCurrency(totalAmount)}</span>
+                  </div>
+                  <div className="flex justify-between text-charcoal/60">
+                    <span>Delivery</span><span>{deliveryFee ? formatCurrency(deliveryFee) : 'Free'}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-forest/10 pt-2 font-semibold text-forest">
+                    <span>Total payable</span><span>{formatCurrency(payableAmount)}</span>
+                  </div>
+                </div>
                 <button
                   type="submit"
                   disabled={checkoutBusy}
                   className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-agri-emerald py-3.5 font-semibold text-forest hover:bg-forest hover:text-ivory disabled:opacity-50 transition-colors"
                 >
                   {checkoutBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {checkoutBusy ? 'Preparing secure checkout…' : `Pay ${formatCurrency(totalAmount)}`}
+                  {checkoutBusy ? 'Preparing secure checkout…' : `Pay ${formatCurrency(payableAmount)}`}
                 </button>
               </form>
             ) : items.length === 0 ? (
@@ -427,11 +443,17 @@ function CartDrawer({
                 </div>
 
                 <div className="border-t border-forest/10 p-5 space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-charcoal/60">Total</span>
-                    <span className="font-display text-2xl text-forest">
-                      {formatCurrency(totalAmount)}
-                    </span>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between text-charcoal/60">
+                      <span>Produce subtotal</span><span>{formatCurrency(totalAmount)}</span>
+                    </div>
+                    <div className="flex justify-between text-charcoal/60">
+                      <span>Delivery {deliveryFee === 0 && '(free over ₹500)'}</span>
+                      <span>{deliveryFee ? formatCurrency(deliveryFee) : 'Free'}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-forest/10 pt-2 font-display text-2xl text-forest">
+                      <span>Total</span><span>{formatCurrency(payableAmount)}</span>
+                    </div>
                   </div>
                   {!isAuthenticated && (
                     <p className="text-xs text-soil-dark bg-soil/5 rounded-lg p-3">

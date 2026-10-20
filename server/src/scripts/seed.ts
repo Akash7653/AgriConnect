@@ -8,10 +8,46 @@ import { PayoutLedger } from '../models/PayoutLedger.js';
 import { SystemSettings } from '../models/SystemSettings.js';
 import { USER_ROLES, ORDER_STATUSES, DEFAULT_PRICING_CONFIG } from '../config/constants.js';
 
+async function ensureBudgetListing(): Promise<void> {
+  const farmer = await User.findOne({ email: 'farmer@agriconnect.in' });
+  if (!farmer) return;
+
+  const farmerProfile = await FarmerProfile.findOne({ userId: farmer._id });
+  if (!farmerProfile) return;
+
+  await CropListing.updateOne(
+    { cropName: 'Everyday Fresh Coriander' },
+    {
+      $setOnInsert: {
+        farmerId: farmer._id,
+        farmerProfileId: farmerProfile._id,
+        cropName: 'Everyday Fresh Coriander',
+        variety: 'Tender Green Bunch',
+        category: 'Greens & Herbs',
+        description: 'Fresh coriander bunch for everyday cooking, harvested and packed the same day.',
+        images: ['https://images.unsplash.com/photo-1515586000433-45406d8e6662?auto=format&fit=crop&w=800&q=80'],
+        qualityGrade: 'A',
+        pricePerUnitPaise: 1000,
+        unit: 'bunch',
+        availableQuantity: 200,
+        minOrderQuantity: 1,
+        harvestDate: new Date(),
+        expectedShelfLifeDays: 3,
+        location: farmerProfile.location,
+        isOrganicCertified: true,
+        status: 'active',
+        viewsCount: 0,
+      },
+    },
+    { upsert: true }
+  );
+}
+
 export async function seedDatabaseIfEmpty(): Promise<void> {
   const userCount = await User.countDocuments();
   if (userCount > 0) {
     console.log(`Database already has ${userCount} users. Skipping seed.`);
+    await ensureBudgetListing();
     return;
   }
   await seedDatabase();
@@ -410,6 +446,26 @@ export async function seedDatabase(): Promise<void> {
       isOrganicCertified: true,
       status: 'active',
       viewsCount: 160,
+    },
+    {
+      farmerId: farmer1._id,
+      farmerProfileId: profileF1._id,
+      cropName: 'Everyday Fresh Coriander',
+      variety: 'Tender Green Bunch',
+      category: 'Greens & Herbs',
+      description: 'Fresh coriander bunch for everyday cooking, harvested and packed the same day.',
+      images: ['https://images.unsplash.com/photo-1515586000433-45406d8e6662?auto=format&fit=crop&w=800&q=80'],
+      qualityGrade: 'A',
+      pricePerUnitPaise: 1000, // ₹10.00 / bunch
+      unit: 'bunch',
+      availableQuantity: 200,
+      minOrderQuantity: 1,
+      harvestDate: new Date(),
+      expectedShelfLifeDays: 3,
+      location: profileF1.location,
+      isOrganicCertified: true,
+      status: 'active',
+      viewsCount: 0,
     },
   ]);
 
