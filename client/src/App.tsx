@@ -5,10 +5,10 @@ import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { AIntro } from '@/components/AIntro';
 import { LandingPage } from '@/pages/LandingPage';
-import { MarketplacePage } from '@/pages/MarketplacePage';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { DashboardRoute } from '@/pages/dashboard/DashboardRoute';
+import { AdvisorChat } from '@/components/advisor/AdvisorChat';
 
 function AppRoutes() {
   const location = useLocation();
@@ -35,6 +35,7 @@ function AppRoutes() {
           <Route path="*" element={<LandingPage />} />
         </Routes>
       </AnimatePresence>
+      <AdvisorChat />
       {isLanding && <Footer />}
     </>
   );

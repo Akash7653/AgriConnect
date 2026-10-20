@@ -60,6 +60,7 @@ export interface IOrder extends Document {
     transactionId?: string;
     paymentOrderId?: string;
     paidAt?: Date;
+    expiresAt?: Date;
     receiptUrl?: string;
   };
   logistics: {
@@ -154,6 +155,7 @@ const OrderSchema = new Schema<IOrder>(
       transactionId: String,
       paymentOrderId: String,
       paidAt: Date,
+      expiresAt: Date,
       receiptUrl: String,
     },
     logistics: {

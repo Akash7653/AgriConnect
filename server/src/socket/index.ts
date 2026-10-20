@@ -3,19 +3,21 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { User } from '../models/User.js';
 import { Order } from '../models/Order.js';
 import { verifyAccessToken } from '../middleware/auth.js';
+import { getAllowedClientOrigins } from '../config/clientOrigins.js';
 
 let ioInstance: SocketIOServer | null = null;
 
 export function initSocketIO(httpServer: HttpServer): SocketIOServer {
-  const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:3000')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const allowedOrigins = getAllowedClientOrigins();
 
   ioInstance = new SocketIOServer(httpServer, {
     cors: {
       origin: allowedOrigins,
       methods: ['GET', 'POST'],
+    },
+    allowRequest: (request, callback) => {
+      const origin = request.headers.origin;
+      callback(null, !origin || allowedOrigins.includes(origin));
     },
     transports: ['websocket', 'polling'],
   });

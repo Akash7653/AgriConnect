@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 
-let mongoMemoryServer: MongoMemoryServer | null = null;
+let mongoMemoryServer: MongoMemoryReplSet | null = null;
 
 export async function connectDB(): Promise<string> {
   const customUri = process.env.NODE_ENV === 'test' ? undefined : process.env.MONGODB_URI;
@@ -30,7 +30,7 @@ export async function connectDB(): Promise<string> {
 
   // No URI set or Atlas connection failed – use in‑memory MongoDB (useful for local dev/testing)
   console.log('⚡ Starting in‑memory MongoDB instance for development');
-  mongoMemoryServer = await MongoMemoryServer.create();
+  mongoMemoryServer = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   const uri = mongoMemoryServer.getUri();
   await mongoose.connect(uri, {
     serverSelectionTimeoutMS: 5000,

@@ -406,9 +406,10 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
 
     // If order delivered, mark payout ledgers as eligible for settlement
     if (status === ORDER_STATUSES.DELIVERED) {
+      const automaticPayoutEligibleAt = new Date();
       await PayoutLedger.updateMany(
-        { orderId: order._id, settlementStatus: 'accrued' },
-        { settlementStatus: 'processing' }
+        { orderId: order._id, entryType: 'sale', settlementStatus: 'accrued' },
+        { $set: { settlementStatus: 'processing', automaticPayoutEligibleAt } }
       );
     }
 

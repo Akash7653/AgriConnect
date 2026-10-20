@@ -2,6 +2,8 @@ import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export interface IPayoutLedger extends Document {
   orderId: Types.ObjectId;
+  entryType: 'sale' | 'refund_adjustment';
+  relatedEntryId?: Types.ObjectId;
   orderNumber: string;
   farmerId: Types.ObjectId;
   farmerName: string;
@@ -11,6 +13,9 @@ export interface IPayoutLedger extends Document {
   platformCommissionPaise: number; // e.g. 8%
   operationsReservePaise: number; // e.g. 2%
   settlementStatus: 'accrued' | 'processing' | 'settled' | 'on_hold' | 'cancelled';
+  automaticPayoutEligibleAt?: Date;
+  automaticPayoutLeaseUntil?: Date;
+  razorpayTransferId?: string;
   bankAccountLast4?: string;
   upiId?: string;
   transactionReference?: string;
@@ -23,6 +28,8 @@ export interface IPayoutLedger extends Document {
 const PayoutLedgerSchema = new Schema<IPayoutLedger>(
   {
     orderId: { type: Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
+    entryType: { type: String, enum: ['sale', 'refund_adjustment'], default: 'sale', required: true },
+    relatedEntryId: { type: Schema.Types.ObjectId, ref: 'PayoutLedger' },
     orderNumber: { type: String, required: true },
     farmerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     farmerName: { type: String, required: true },
@@ -37,6 +44,9 @@ const PayoutLedgerSchema = new Schema<IPayoutLedger>(
       default: 'accrued',
       index: true,
     },
+    automaticPayoutEligibleAt: Date,
+    automaticPayoutLeaseUntil: Date,
+    razorpayTransferId: { type: String, sparse: true, unique: true },
     bankAccountLast4: String,
     upiId: String,
     transactionReference: String,

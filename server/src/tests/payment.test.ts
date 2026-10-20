@@ -5,7 +5,10 @@ import { app } from '../index.js';
 import { connectDB, disconnectDB } from '../config/db.js';
 import { CropListing } from '../models/CropListing.js';
 import { Order } from '../models/Order.js';
+import { Refund } from '../models/Refund.js';
+import { PayoutLedger } from '../models/PayoutLedger.js';
 import { seedDatabase } from '../scripts/seed.js';
+import { expirePendingOrders } from '../jobs/expirePendingOrders.js';
 
 const testSeedPassword = crypto.randomBytes(32).toString('base64url');
 
@@ -184,5 +187,146 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
 
     expect([400, 503]).toContain(res.status);
     expect(res.body.success).toBe(false);
+  });
+
+  it('6. Expired pending payment releases reserved stock transactionally', async () => {
+    const login = await request(app).post('/api/auth/login').send({
+      email: 'buyer@agriconnect.in',
+      password: testSeedPassword,
+    });
+    const listing = await CropListing.findOne({ status: 'active', availableQuantity: { $gt: 2 } });
+    expect(listing).toBeDefined();
+    const before = await CropListing.findById(listing!._id);
+    const createRes = await request(app)
+      .post('/api/payment/create-order')
+      .set('Authorization', `Bearer ${login.body.token}`)
+      .send({
+        items: [{ listingId: listing!._id.toString(), quantity: 1 }],
+        deliveryAddress: {
+          recipientName: 'Priya Sharma', phone: '9123456789', addressLine1: 'Madhapur',
+          city: 'Hyderabad', district: 'Hyderabad', state: 'Telangana', pinCode: '500081',
+        },
+        deliverySlot: { date: new Date().toISOString().slice(0, 10), timeWindow: '07:00 AM - 11:00 AM' },
+      });
+    expect(createRes.status).toBe(201);
+
+    const order = await Order.findById(createRes.body.orderId);
+    order!.payment.expiresAt = new Date(Date.now() - 1000);
+    await order!.save();
+
+    expect(await expirePendingOrders()).toBe(1);
+    const expired = await Order.findById(order!._id);
+    expect(expired?.status).toBe('cancelled');
+    expect(expired?.payment.status).toBe('failed');
+
+    const after = await CropListing.findById(listing!._id);
+    expect(after?.availableQuantity).toBe(before!.availableQuantity);
+    expect(after?.reservedQuantity).toBe(before!.reservedQuantity);
+  });
+
+  it('7. Processes signed refund webhooks and restores inventory exactly once', async () => {
+    const order = await Order.findOne({
+      status: 'confirmed',
+      'payment.status': 'captured',
+      'payment.transactionId': /^pay_test_/,
+    });
+    expect(order).toBeDefined();
+    const listing = await CropListing.findById(order!.items[0].listingId);
+    const buyer = order!.buyerId;
+    const refundId = `rfnd_test_${Date.now()}`;
+    await Refund.create({
+      orderId: order!._id,
+      orderNumber: order!.orderNumber,
+      paymentId: order!.payment.transactionId,
+      amountPaise: order!.pricing.finalPayablePaise,
+      currency: 'INR',
+      status: 'pending',
+      reason: 'Test refund webhook',
+      idempotencyKey: `refund-webhook-${Date.now()}-key`,
+      requestedBy: buyer,
+    });
+
+    const eventId = `refund-event-${Date.now()}`;
+    const rawPayload = JSON.stringify({
+      event: 'refund.processed',
+      payload: {
+        refund: {
+          entity: {
+            id: refundId,
+            payment_id: order!.payment.transactionId,
+            amount: order!.pricing.finalPayablePaise,
+            currency: 'INR',
+            status: 'processed',
+          },
+        },
+      },
+    });
+    const webhookSecret = 'unit-test-webhook-secret';
+    process.env.RAZORPAY_WEBHOOK_SECRET = webhookSecret;
+    const signature = crypto.createHmac('sha256', webhookSecret).update(rawPayload).digest('hex');
+    const response = await request(app)
+      .post('/api/payment/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-razorpay-event-id', eventId)
+      .set('x-razorpay-signature', signature)
+      .send(rawPayload);
+
+    expect(response.status).toBe(200);
+    expect((await Order.findById(order!._id))?.payment.status).toBe('refunded');
+    expect((await Refund.findOne({ providerRefundId: refundId }))?.status).toBe('processed');
+    const listingAfter = await CropListing.findById(listing!._id);
+    expect(listingAfter?.availableQuantity).toBe(listing!.availableQuantity + order!.items[0].quantity);
+    expect(await PayoutLedger.countDocuments({ orderId: order!._id, entryType: 'refund_adjustment' })).toBeGreaterThan(0);
+
+    const duplicate = await request(app)
+      .post('/api/payment/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-razorpay-event-id', eventId)
+      .set('x-razorpay-signature', signature)
+      .send(rawPayload);
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.body.message).toContain('duplicate');
+    expect((await CropListing.findById(listing!._id))?.availableQuantity).toBe(listingAfter?.availableQuantity);
+  });
+
+  it('8. Reconciles Razorpay Route transfer webhooks to payout ledgers', async () => {
+    const farmerId = (await Order.findOne({ 'payment.status': 'captured' }))?.items[0].farmerId;
+    expect(farmerId).toBeDefined();
+    const ledger = await PayoutLedger.create({
+      orderId: (await Order.findOne({ 'payment.status': 'captured' }))!._id,
+      orderNumber: `PAYOUT-${Date.now()}`,
+      farmerId,
+      farmerName: 'Test Farmer',
+      grossProductValuePaise: 10000,
+      farmerSharePct: 90,
+      farmerPayoutPaise: 9000,
+      platformCommissionPaise: 800,
+      operationsReservePaise: 200,
+      settlementStatus: 'processing',
+    });
+
+    const transferId = `trf_test_${Date.now()}`;
+    const eventId = `transfer-event-${Date.now()}`;
+    const rawPayload = JSON.stringify({
+      event: 'transfer.processed',
+      payload: {
+        transfer: {
+          entity: { id: transferId, status: 'processed', notes: { payout_ledger_id: ledger._id.toString() } },
+        },
+      },
+    });
+    const webhookSecret = 'unit-test-webhook-secret';
+    const signature = crypto.createHmac('sha256', webhookSecret).update(rawPayload).digest('hex');
+    const response = await request(app)
+      .post('/api/payment/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-razorpay-event-id', eventId)
+      .set('x-razorpay-signature', signature)
+      .send(rawPayload);
+
+    expect(response.status).toBe(200);
+    const settled = await PayoutLedger.findById(ledger._id);
+    expect(settled?.settlementStatus).toBe('settled');
+    expect(settled?.razorpayTransferId).toBe(transferId);
   });
 });

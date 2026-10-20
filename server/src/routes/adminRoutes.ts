@@ -12,6 +12,8 @@ import {
   getAdminOrders,
   assignDeliveryAgent,
   approveAccountRole,
+  refundOrder,
+  setFarmerRazorpayAccount,
 } from '../controllers/adminController.js';
 import { authenticateToken, requireRole, AuthRequest } from '../middleware/auth.js';
 import { USER_ROLES } from '../config/constants.js';
@@ -40,5 +42,7 @@ router.delete('/service-zones/:id', deactivateServiceZone);
 router.get('/orders', getAdminOrders);
 router.post('/orders/:id/assign-delivery', assignDeliveryAgent);
 router.patch('/users/:userId/role', approveAccountRole);
+router.post('/orders/:id/refund', refundOrder);
+router.patch('/farmers/:farmerId/razorpay-account', setFarmerRazorpayAccount);
 
 export default router;

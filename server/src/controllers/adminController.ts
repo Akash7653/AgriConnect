@@ -8,6 +8,9 @@ import { ServiceZone } from '../models/ServiceZone.js';
 import mongoose from 'mongoose';
 import { RealtimeNotifier } from '../socket/index.js';
 import { SEEDED_DEMO_ACCOUNT_EMAILS } from '../config/demoAccounts.js';
+import { Refund } from '../models/Refund.js';
+import { createRazorpayRefund } from '../services/razorpay.js';
+import { finalizeRefund } from '../services/refunds.js';
 import { Order } from '../models/Order.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
 import { SystemSettings } from '../models/SystemSettings.js';
@@ -507,5 +510,137 @@ export async function approveAccountRole(req: AuthRequest, res: Response): Promi
     res.json({ success: true, user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified } });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+const refundRequestSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+  idempotencyKey: z.string().trim().min(16).max(120),
+}).strict();
+
+export async function refundOrder(req: AuthRequest, res: Response): Promise<void> {
+  let refund: any;
+  try {
+    const data = refundRequestSchema.parse(req.body);
+    const existing = await Refund.findOne({ idempotencyKey: data.idempotencyKey });
+    if (existing) {
+      res.status(existing.status === 'processed' ? 200 : 202).json({ success: existing.status === 'processed', refund: existing });
+      return;
+    }
+    const orderRefund = await Refund.findOne({ orderId: req.params.id, status: { $in: ['pending', 'processed'] } });
+    if (orderRefund) {
+      res.status(409).json({ success: false, message: 'A refund request already exists for this order.', refundId: orderRefund._id });
+      return;
+    }
+
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      res.status(404).json({ success: false, message: 'Order not found.' });
+      return;
+    }
+    if (order.payment.status !== 'captured' || order.status !== ORDER_STATUSES.CONFIRMED || !order.payment.transactionId) {
+      res.status(409).json({ success: false, message: 'Only captured, unfulfilled orders can be refunded through this endpoint.' });
+      return;
+    }
+
+    refund = await Refund.create({
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      paymentId: order.payment.transactionId,
+      amountPaise: order.pricing.finalPayablePaise,
+      currency: 'INR',
+      status: 'pending',
+      reason: data.reason,
+      idempotencyKey: data.idempotencyKey,
+      requestedBy: req.user!._id,
+    });
+
+    let providerRefund: Awaited<ReturnType<typeof createRazorpayRefund>>;
+    try {
+      providerRefund = await createRazorpayRefund({
+        paymentId: order.payment.transactionId,
+        amountPaise: order.pricing.finalPayablePaise,
+        receipt: `refund-${order.orderNumber}`,
+      });
+    } catch {
+      refund.providerStatus = 'unknown';
+      await refund.save();
+      res.status(202).json({ success: false, message: 'Refund request outcome is uncertain; reconcile it in Razorpay before retrying.', refundId: refund._id });
+      return;
+    }
+
+    refund.providerRefundId = providerRefund.id;
+    refund.providerStatus = providerRefund.status;
+    await refund.save();
+
+    if (providerRefund.amount !== order.pricing.finalPayablePaise || providerRefund.currency !== 'INR') {
+      refund.status = 'failed';
+      await refund.save();
+      res.status(502).json({ success: false, message: 'Razorpay refund amount did not match the order. Manual reconciliation required.' });
+      return;
+    }
+    if (providerRefund.status !== 'processed') {
+      res.status(202).json({ success: false, message: 'Razorpay accepted the refund; awaiting provider confirmation.', refund });
+      return;
+    }
+
+    await finalizeRefund({
+      refundId: refund._id.toString(),
+      providerRefundId: providerRefund.id,
+      amountPaise: providerRefund.amount,
+      currency: providerRefund.currency,
+      actor: {
+        userId: req.user!._id,
+        userName: req.user!.name,
+        role: USER_ROLES.ADMIN,
+        ipAddress: req.ip,
+      },
+    });
+
+    refund.status = 'processed';
+    res.json({ success: true, refund });
+  } catch (err: any) {
+    if (refund?._id && refund.status === 'pending' && !refund.providerRefundId) {
+      await Refund.updateOne(
+        { _id: refund._id, status: 'pending', providerRefundId: { $exists: false } },
+        { $set: { status: 'failed', providerStatus: 'request_failed' } }
+      );
+    }
+    res.status(err?.code === 11000 ? 409 : 400).json({ success: false, message: err.message || 'Refund could not be processed.' });
+  }
+}
+
+const razorpayAccountSchema = z.object({
+  razorpayAccountId: z.string().trim().regex(/^acc_[A-Za-z0-9]+$/, 'A valid Razorpay Route linked account ID is required.'),
+}).strict();
+
+export async function setFarmerRazorpayAccount(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { razorpayAccountId } = razorpayAccountSchema.parse(req.body);
+    const profile = await FarmerProfile.findOneAndUpdate(
+      { userId: req.params.farmerId },
+      { $set: { razorpayAccountId } },
+      { new: true, runValidators: true }
+    ).select('userId razorpayAccountId');
+
+    if (!profile) {
+      res.status(404).json({ success: false, message: 'Farmer profile not found.' });
+      return;
+    }
+
+    await AuditLog.create({
+      action: 'FARMER_RAZORPAY_ACCOUNT_LINKED',
+      userId: req.user!._id,
+      userName: req.user!.name,
+      role: req.user!.role,
+      targetResource: 'FarmerProfile',
+      resourceId: profile._id.toString(),
+      details: { razorpayAccountId },
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, farmerId: profile.userId, razorpayAccountId: profile.razorpayAccountId });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message || 'Could not link Razorpay account.' });
   }
 }

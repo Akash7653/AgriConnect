@@ -16,6 +16,9 @@ import {
 } from '../services/razorpay.js';
 import { RealtimeNotifier } from '../socket/index.js';
 import { checkServiceability } from '../services/serviceability.js';
+import { queueOrderConfirmation } from '../services/email.js';
+import { Refund } from '../models/Refund.js';
+import { finalizeRefund } from '../services/refunds.js';
 
 export const createPaymentOrderSchema = z.object({
   items: z
@@ -203,6 +206,7 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
         status: 'pending',
         gateway: 'razorpay_standard',
         paymentOrderId: rzpOrder.id,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
       },
       idempotencyKey: data.idempotencyKey,
     });
@@ -343,6 +347,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
     });
 
     await order.save();
+    void queueOrderConfirmation(order._id.toString()).catch(() => console.warn('Order confirmation email could not be queued.'));
     RealtimeNotifier.emitAdminMetricsRefresh({ type: 'payment_verified' });
 
     // Create transparent Payout Ledger records for each farmer
@@ -448,11 +453,13 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
   const eventType = typeof event.event === 'string' ? event.event : 'unknown';
   const paymentPayload = event.payload?.payment?.entity;
   const orderPayload = event.payload?.order?.entity;
+  const refundPayload = event.payload?.refund?.entity;
+  const transferPayload = event.payload?.transfer?.entity;
   const razorpayOrderId = paymentPayload?.order_id || (eventType === 'order.paid' ? orderPayload?.id : undefined);
 
   // Deduplication
   const existingEvent = await WebhookEvent.findOne({ eventId });
-  if (existingEvent) {
+  if (existingEvent?.status === 'processed') {
     res.json({ success: true, message: 'Event already processed (duplicate)' });
     return;
   }
@@ -472,9 +479,25 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
       currency: orderPayload.currency,
       status: orderPayload.status,
     } : undefined,
+    refund: refundPayload ? {
+      id: refundPayload.id,
+      payment_id: refundPayload.payment_id,
+      amount: refundPayload.amount,
+      currency: refundPayload.currency,
+      status: refundPayload.status,
+    } : undefined,
+    transfer: transferPayload ? {
+      id: transferPayload.id,
+      status: transferPayload.status,
+      notes: transferPayload.notes,
+    } : undefined,
   };
   try {
-    await WebhookEvent.create({ eventId, eventType, payload: safePayload, status: 'processed' });
+    if (existingEvent) {
+      await WebhookEvent.updateOne({ eventId }, { $set: { eventType, payload: safePayload, status: 'failed' } });
+    } else {
+      await WebhookEvent.create({ eventId, eventType, payload: safePayload, status: 'failed' });
+    }
   } catch (error: any) {
     if (error?.code === 11000) {
       res.json({ success: true, message: 'Event already processed (duplicate)' });
@@ -507,6 +530,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
         });
 
         await order.save();
+        void queueOrderConfirmation(order._id.toString()).catch(() => console.warn('Order confirmation email could not be queued.'));
         RealtimeNotifier.emitAdminMetricsRefresh({ type: 'webhook_payment_captured' });
       }
     }
@@ -538,7 +562,115 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
         RealtimeNotifier.emitAdminMetricsRefresh({ type: 'webhook_payment_failed' });
       }
     }
+  } else if (['refund.created', 'refund.processed', 'refund.failed'].includes(eventType)) {
+    const providerRefundId = typeof refundPayload?.id === 'string' ? refundPayload.id : undefined;
+    const paymentId = typeof refundPayload?.payment_id === 'string' ? refundPayload.payment_id : undefined;
+    const refund = await Refund.findOne({
+      $or: [
+        ...(providerRefundId ? [{ providerRefundId }] : []),
+        ...(paymentId ? [{ paymentId, status: 'pending' }] : []),
+      ],
+    }).sort({ createdAt: 1 });
+
+    if (!refund) {
+      await WebhookEvent.updateOne({ eventId }, { $set: { status: 'ignored' } });
+      res.json({ success: true, message: 'Refund event does not match an outstanding AgriConnect refund.' });
+      return;
+    }
+    if (refund.status === 'processed') {
+      await WebhookEvent.updateOne({ eventId }, { $set: { status: 'ignored' } });
+      res.json({ success: true, message: 'Refund was already reconciled.' });
+      return;
+    }
+
+    if (eventType === 'refund.failed') {
+      refund.providerRefundId = providerRefundId || refund.providerRefundId;
+      refund.providerStatus = typeof refundPayload?.status === 'string' ? refundPayload.status : 'failed';
+      refund.status = 'failed';
+      await refund.save();
+    } else if (eventType === 'refund.created') {
+      refund.providerRefundId = providerRefundId || refund.providerRefundId;
+      refund.providerStatus = typeof refundPayload?.status === 'string' ? refundPayload.status : 'created';
+      await refund.save();
+    } else {
+      if (!providerRefundId) {
+        await WebhookEvent.updateOne({ eventId }, { $set: { status: 'failed' } });
+        res.status(400).json({ success: false, message: 'Refund webhook is missing its provider refund ID.' });
+        return;
+      }
+      try {
+        await finalizeRefund({
+          refundId: refund._id.toString(),
+          providerRefundId,
+          amountPaise: Number(refundPayload?.amount),
+          currency: typeof refundPayload?.currency === 'string' ? refundPayload.currency : '',
+        });
+      } catch (error) {
+        await WebhookEvent.updateOne({ eventId }, { $set: { status: 'failed' } });
+        res.status(500).json({
+          success: false,
+          message: error instanceof Error ? error.message : 'Refund reconciliation failed.',
+        });
+        return;
+      }
+    }
+  } else if (['transfer.processed', 'transfer.failed', 'transfer.reversed'].includes(eventType)) {
+    const transferId = typeof transferPayload?.id === 'string' ? transferPayload.id : undefined;
+    const ledgerId = typeof transferPayload?.notes?.payout_ledger_id === 'string'
+      ? transferPayload.notes.payout_ledger_id
+      : undefined;
+    const payout = await PayoutLedger.findOne({
+      settlementStatus: { $in: ['processing', 'settled'] },
+      $or: [
+        ...(transferId ? [{ razorpayTransferId: transferId }] : []),
+        ...(ledgerId ? [{ _id: ledgerId }] : []),
+      ],
+    });
+
+    if (!payout) {
+      await WebhookEvent.updateOne({ eventId }, { $set: { status: 'ignored' } });
+      res.json({ success: true, message: 'Transfer event does not match an eligible payout ledger.' });
+      return;
+    }
+
+    if (eventType === 'transfer.processed') {
+      const settled = await PayoutLedger.findOneAndUpdate(
+        { _id: payout._id, settlementStatus: 'processing' },
+        {
+          $set: {
+            settlementStatus: 'settled',
+            razorpayTransferId: transferId || payout.razorpayTransferId,
+            transactionReference: transferId || payout.transactionReference,
+            settledAt: new Date(),
+          },
+          $unset: { automaticPayoutLeaseUntil: 1 },
+        },
+        { new: true }
+      );
+      if (settled) {
+        await Notification.create({
+          recipientId: settled.farmerId,
+          title: 'Farmer Payout Settled',
+          message: `Your payout of ₹${(settled.farmerPayoutPaise / 100).toFixed(2)} for Order #${settled.orderNumber} has been settled.`,
+          type: 'payout',
+          link: '/farmer/payouts',
+        });
+      }
+    } else {
+      await PayoutLedger.updateOne(
+        { _id: payout._id, settlementStatus: 'processing' },
+        {
+          $set: {
+            settlementStatus: 'on_hold',
+            razorpayTransferId: transferId || payout.razorpayTransferId,
+            notes: `Razorpay Route transfer ${eventType.slice('transfer.'.length)}; review in the Razorpay dashboard.`,
+          },
+          $unset: { automaticPayoutLeaseUntil: 1 },
+        }
+      );
+    }
   }
 
+  await WebhookEvent.updateOne({ eventId }, { $set: { status: 'processed' } });
   res.json({ success: true, message: 'Webhook processed' });
 }

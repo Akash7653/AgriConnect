@@ -39,6 +39,10 @@ import paymentRoutes from './routes/paymentRoutes.js';
 import serviceabilityRoutes from './routes/serviceabilityRoutes.js';
 import locationRoutes from './routes/locationRoutes.js';
 import { seedDatabaseIfEmpty } from './scripts/seed.js';
+import { startPendingOrderExpiryJob } from './jobs/expirePendingOrders.js';
+import { startEmailOutboxJob } from './jobs/emailOutbox.js';
+import { startAutomaticPayoutJob } from './jobs/automaticPayouts.js';
+import { getAllowedClientOrigins } from './config/clientOrigins.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -67,10 +71,7 @@ const paymentLimiter = rateLimit({
 // Initialize Socket.IO
 initSocketIO(server);
 
-const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:3000')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = getAllowedClientOrigins();
 
 // Security & Utility Middlewares
 app.use(
@@ -176,6 +177,10 @@ async function bootstrap() {
     await connectDB();
     if (process.env.NODE_ENV !== 'production') {
       await seedDatabaseIfEmpty();
+    } else {
+      startPendingOrderExpiryJob();
+      startEmailOutboxJob();
+      startAutomaticPayoutJob();
     }
 
     server.listen(PORT, () => {

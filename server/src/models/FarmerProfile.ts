@@ -32,6 +32,7 @@ export interface IFarmerProfile extends Document {
     bankName: string;
     upiId?: string;
   };
+  razorpayAccountId?: string;
   rating: number;
   totalOrdersFulfilled: number;
   totalRevenuePaise: number;
@@ -80,6 +81,7 @@ const FarmerProfileSchema = new Schema<IFarmerProfile>(
       bankName: { type: String, default: '' },
       upiId: { type: String, default: '' },
     },
+    razorpayAccountId: { type: String, trim: true },
     rating: { type: Number, default: 0, min: 0, max: 5 },
     totalOrdersFulfilled: { type: Number, default: 0 },
     totalRevenuePaise: { type: Number, default: 0 },

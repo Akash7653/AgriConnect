@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "AgriConnect",
+    "slug": "agriconnect",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "AgriConnect uses your location only when you request help suggesting a delivery address."
+      }
+    },
+    "android": {
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "AgriConnect uses your location only when you request help suggesting a delivery address."
+        }
+      ]
+    ]
+  }
+}

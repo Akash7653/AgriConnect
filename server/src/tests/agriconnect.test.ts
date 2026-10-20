@@ -8,6 +8,8 @@ import { Order } from '../models/Order.js';
 import { User } from '../models/User.js';
 import { seedDatabase } from '../scripts/seed.js';
 import { randomBytes } from 'crypto';
+import { EmailOutbox } from '../models/EmailOutbox.js';
+import { queueOrderConfirmation, processEmailOutbox } from '../services/email.js';
 
 const testSeedPassword = randomBytes(32).toString('base64url');
 
@@ -290,5 +292,46 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .send({ recipientSignature: 'Recipient confirmed' });
     expect(completion.status).toBe(200);
     expect(completion.body.order.status).toBe('delivered');
+  });
+
+  it('10. Should refuse refunds before provider payment capture', async () => {
+    const buyer = await User.findOne({ email: 'buyer@agriconnect.in' });
+    const order = await Order.create({
+      orderNumber: `REF-${Date.now()}`,
+      buyerId: buyer!._id,
+      buyerName: buyer!.name,
+      buyerRole: buyer!.role,
+      buyerPhone: buyer!.phone,
+      items: [],
+      pricing: { grossProductValuePaise: 1000, farmerPayoutPaise: 900, platformCommissionPaise: 80, operationsReservePaise: 20, deliveryFeePaise: 0, finalPayablePaise: 1000 },
+      deliveryAddress: { recipientName: buyer!.name, phone: buyer!.phone, addressLine1: 'Address', city: 'Hyderabad', district: 'Hyderabad', state: 'Telangana', pinCode: '500081' },
+      deliverySlot: { date: new Date().toISOString().slice(0, 10), timeWindow: '07:00 AM - 11:00 AM' },
+      status: 'pending_payment',
+      statusHistory: [{ status: 'pending_payment', timestamp: new Date(), role: 'buyer' }],
+      payment: { status: 'pending', gateway: 'razorpay_standard' },
+    });
+    const adminLogin = await request(app).post('/api/auth/login').send({ email: 'admin@agriconnect.in', password: testSeedPassword });
+    const result = await request(app)
+      .post(`/api/admin/orders/${order._id}/refund`)
+      .set('Authorization', `Bearer ${adminLogin.body.token}`)
+      .send({ reason: 'Customer requested cancellation', idempotencyKey: `refund-test-${Date.now()}-key` });
+    expect(result.status).toBe(409);
+  });
+
+  it('11. Should queue order email once and not send when Resend is unconfigured', async () => {
+    const orderId = new Order()._id.toString();
+    const eventKey = `order-confirmation:${orderId}`;
+    await queueOrderConfirmation(orderId);
+    await queueOrderConfirmation(orderId);
+    expect(await EmailOutbox.countDocuments({ eventKey })).toBe(1);
+
+    const priorApiKey = process.env.RESEND_API_KEY;
+    const priorFrom = process.env.RESEND_FROM_EMAIL;
+    delete process.env.RESEND_API_KEY;
+    delete process.env.RESEND_FROM_EMAIL;
+    expect(await processEmailOutbox()).toBe(0);
+    process.env.RESEND_API_KEY = priorApiKey;
+    process.env.RESEND_FROM_EMAIL = priorFrom;
+    await EmailOutbox.deleteOne({ eventKey });
   });
 });

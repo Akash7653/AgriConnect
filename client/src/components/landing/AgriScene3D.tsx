@@ -1,6 +1,6 @@
-import { Suspense, useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Float, Environment } from '@react-three/drei';
+import { Float } from '@react-three/drei';
 import * as THREE from 'three';
 import { prefersReducedMotion } from '@/utils';
 
@@ -94,17 +94,14 @@ function Scene() {
   const reduced = typeof window !== 'undefined' && prefersReducedMotion();
   return (
     <>
-      <ambientLight intensity={0.4} />
-      <directionalLight position={[3, 5, 2]} intensity={1.1} castShadow color="#FFE5B0" />
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[3, 5, 2]} intensity={1.3} castShadow color="#FFE5B0" />
       <fog attach="fog" args={['#163D2B', 6, 14]} />
-      <Suspense fallback={null}>
-        <Float speed={reduced ? 0 : 1.2} rotationIntensity={0.2} floatIntensity={0.4}>
-          <CropField />
-        </Float>
-        <RollingHills />
-        <Sun />
-        <Environment preset="sunset" />
-      </Suspense>
+      <Float speed={reduced ? 0 : 1.2} rotationIntensity={0.2} floatIntensity={0.4}>
+        <CropField />
+      </Float>
+      <RollingHills />
+      <Sun />
     </>
   );
 }
@@ -113,17 +110,31 @@ interface AgriScene3DProps {
   className?: string;
 }
 
+const fallbackImage =
+  'https://images.pexels.com/photos/9158581/pexels-photo-9158581.jpeg?auto=compress&cs=tinysrgb&w=1200';
+
 export function AgriScene3D({ className }: AgriScene3DProps) {
+  const [webglAvailable, setWebglAvailable] = useState(true);
+  const fallback = <img src={fallbackImage} alt="Lush green crops beneath a dramatic sunset" className="h-full w-full object-cover" />;
+
   return (
-    <div className={className}>
-      <Canvas
-        shadows="basic"
-        dpr={[1, 1.5]}
-        camera={{ position: [0, 2.2, 5], fov: 42 }}
-        gl={{ antialias: true, alpha: true }}
-      >
-        <Scene />
-      </Canvas>
+    <div className={className} aria-label="Animated 3D agricultural field">
+      {webglAvailable ? (
+        <Canvas
+          fallback={fallback}
+          shadows="basic"
+          dpr={[1, 1.5]}
+          camera={{ position: [0, 2.2, 5], fov: 42 }}
+          gl={{ antialias: true, alpha: true }}
+          onCreated={({ gl }) => {
+            gl.domElement.addEventListener('webglcontextlost', () => setWebglAvailable(false), { once: true });
+          }}
+        >
+          <Scene />
+        </Canvas>
+      ) : (
+        fallback
+      )}
     </div>
   );
 }

@@ -128,3 +128,61 @@ export async function fetchPaymentFromRazorpay(paymentId: string): Promise<any |
     return null;
   }
 }
+
+export async function createRazorpayRefund(params: {
+  paymentId: string;
+  amountPaise: number;
+  receipt: string;
+}): Promise<{ id: string; status: string; amount: number; currency: string }> {
+  const client = getRazorpayClient();
+  if (!client) throw new Error('Razorpay is not configured.');
+  const refund = await client.payments.refund(params.paymentId, {
+    amount: params.amountPaise,
+    notes: { receipt: params.receipt.slice(0, 40) },
+  });
+  return {
+    id: refund.id,
+    status: refund.status,
+    amount: Number(refund.amount),
+    currency: refund.currency,
+  };
+}
+
+export async function createRazorpayRouteTransfer(params: {
+  paymentId: string;
+  accountId: string;
+  amountPaise: number;
+  ledgerId: string;
+}): Promise<{ id: string; status: string }> {
+  const client = getRazorpayClient();
+  if (!client) throw new Error('Razorpay is not configured.');
+  const result = await client.payments.transfer(params.paymentId, {
+    transfers: [{
+      account: params.accountId,
+      amount: params.amountPaise,
+      currency: 'INR',
+      notes: { payout_ledger_id: params.ledgerId },
+    }],
+  });
+  const transfer = result.items.find((item) => item.notes?.payout_ledger_id === params.ledgerId);
+  if (!transfer) throw new Error('Razorpay did not return the requested Route transfer.');
+  return { id: transfer.id, status: transfer.status };
+}
+
+export async function findRazorpayRouteTransfer(params: {
+  paymentId: string;
+  ledgerId: string;
+}): Promise<{ id: string; status: string } | null> {
+  const client = getRazorpayClient();
+  if (!client) throw new Error('Razorpay is not configured.');
+  const transfers = await client.payments.fetchTransfer(params.paymentId);
+  const transfer = transfers.items.find((item) => item.notes?.payout_ledger_id === params.ledgerId);
+  return transfer ? { id: transfer.id, status: transfer.status } : null;
+}
+
+export async function fetchRazorpayRouteTransfer(transferId: string): Promise<{ id: string; status: string }> {
+  const client = getRazorpayClient();
+  if (!client) throw new Error('Razorpay is not configured.');
+  const transfer = await client.transfers.fetch(transferId);
+  return { id: transfer.id, status: transfer.status };
+}

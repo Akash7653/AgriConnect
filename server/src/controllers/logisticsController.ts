@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth.js';
 import { USER_ROLES, ORDER_STATUSES, OrderStatus } from '../config/constants.js';
 import { RealtimeNotifier } from '../socket/index.js';
 import { AuditLog } from '../models/AuditLog.js';
+import { PayoutLedger } from '../models/PayoutLedger.js';
 
 export async function getAvailableDeliveries(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -165,6 +166,11 @@ export async function completeDelivery(req: AuthRequest, res: Response): Promise
     });
 
     await order.save();
+
+    await PayoutLedger.updateMany(
+      { orderId: order._id, entryType: 'sale', settlementStatus: 'accrued' },
+      { $set: { settlementStatus: 'processing', automaticPayoutEligibleAt: order.logistics.deliveredTime } }
+    );
 
     await AuditLog.create({
       action: 'DELIVERY_COMPLETED',
