@@ -17,7 +17,8 @@ export function getRazorpayClient(): Razorpay | null {
       key_id,
       key_secret,
     });
-    console.log('💳 Razorpay Test Mode client initialized successfully.');
+    const mode = key_id.startsWith('rzp_live_') ? 'Live' : key_id.startsWith('rzp_test_') ? 'Test' : 'Configured';
+    console.log(`💳 Razorpay ${mode} Mode client initialized successfully.`);
   }
 
   return razorpayInstance;
@@ -28,15 +29,12 @@ export async function createRazorpayOrder(options: {
   currency?: string;
   receipt: string;
   notes?: Record<string, string>;
-}): Promise<{ id: string; amount: number; currency: string } | null> {
+}): Promise<{ id: string; amount: number; currency: string }> {
   const rzp = getRazorpayClient();
   if (!rzp) {
-    // Development simulated fallback if credentials missing
-    return {
-      id: `order_sbx_${Date.now()}`,
-      amount: options.amountPaise,
-      currency: options.currency || 'INR',
-    };
+    const error = new Error('Razorpay credentials are not configured.') as Error & { statusCode: number };
+    error.statusCode = 500;
+    throw error;
   }
 
   try {
@@ -53,7 +51,9 @@ export async function createRazorpayOrder(options: {
     };
   } catch (err: any) {
     console.error('Failed to create Razorpay order:', err);
-    throw new Error(`Razorpay Order Creation Failed: ${err.message}`);
+    const error = new Error(`Razorpay Order Creation Failed: ${err.message}`) as Error & { statusCode: number };
+    error.statusCode = err.statusCode || err.status || 500;
+    throw error;
   }
 }
 

@@ -43,11 +43,15 @@ interface RazorpayOptions {
   description: string;
   order_id: string;
   handler: (result: RazorpayResult) => void;
+  modal: { ondismiss: () => void };
   theme: { color: string };
 }
 
 interface RazorpayConstructor {
-  new (options: RazorpayOptions): { open: () => void };
+  new (options: RazorpayOptions): {
+    open: () => void;
+    on: (event: 'payment.failed', handler: (response: { error?: { description?: string } }) => void) => void;
+  };
 }
 
 declare global {
@@ -133,20 +137,9 @@ export const PaymentService = {
     onError: (message: string) => void
   ) {
     try {
-      if (order.razorpayOrderId.startsWith('order_sbx_')) {
-        await new Promise((resolve) => window.setTimeout(resolve, 650));
-        const verified = await PaymentService.verifyPayment(session, order.orderId, {
-          razorpay_order_id: order.razorpayOrderId,
-          razorpay_payment_id: `pay_sbx_${Date.now()}`,
-          razorpay_signature: 'offline-sandbox-signature',
-        });
-        onSuccess(verified.orderNumber, order.amountPaise);
-        return;
-      }
-
       const Razorpay = await loadRazorpay();
-      new Razorpay({
-        key: order.keyId,
+      const checkout = new Razorpay({
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID || order.keyId,
         amount: order.amountPaise,
         currency: order.currency,
         name: 'AgriConnect',
@@ -161,7 +154,14 @@ export const PaymentService = {
             onError(error instanceof Error ? error.message : 'Payment verification failed.');
           }
         },
-      }).open();
+        modal: {
+          ondismiss: () => onError('Payment cancelled.')
+        },
+      });
+      checkout.on('payment.failed', (response) => {
+        onError(response.error?.description || 'Payment failed. Please try again.');
+      });
+      checkout.open();
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Unable to open payment checkout.');
     }

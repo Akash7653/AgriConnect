@@ -43,6 +43,8 @@ export const createPaymentOrderSchema = z.object({
 });
 
 export async function createPaymentOrder(req: AuthRequest, res: Response): Promise<void> {
+  const reservedItems: Array<{ listingId: string; quantity: number }> = [];
+
   try {
     if (!req.user) {
       res.status(401).json({ success: false, message: 'Authentication required' });
@@ -52,7 +54,6 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
     const data = createPaymentOrderSchema.parse(req.body);
 
     // Concurrency-safe atomic stock reservation
-    const reservedItems: Array<{ listingId: string; quantity: number }> = [];
     const orderItems: IOrderItem[] = [];
     let grossProductValuePaise = 0;
 
@@ -134,6 +135,19 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
 
     const finalPayablePaise = grossProductValuePaise + deliveryFeePaise;
 
+    if (finalPayablePaise < 100) {
+      for (const reserved of reservedItems) {
+        await CropListing.findByIdAndUpdate(reserved.listingId, {
+          $inc: {
+            availableQuantity: reserved.quantity,
+            reservedQuantity: -reserved.quantity,
+          },
+        });
+      }
+      res.status(400).json({ success: false, message: 'Payment amount must be at least 100 paise.' });
+      return;
+    }
+
     // Generate Order Number
     const timestamp = Date.now().toString().slice(-6);
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
@@ -181,7 +195,7 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
       payment: {
         status: 'pending',
         gateway: 'razorpay_sandbox',
-        paymentOrderId: rzpOrder?.id || '',
+        paymentOrderId: rzpOrder.id,
       },
       idempotencyKey: data.idempotencyKey,
     });
@@ -191,13 +205,26 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
       message: 'Payment order created with stock reserved',
       orderId: order._id,
       orderNumber: order.orderNumber,
-      razorpayOrderId: rzpOrder?.id || '',
+      razorpayOrderId: rzpOrder.id,
       amountPaise: finalPayablePaise,
       currency: 'INR',
-      keyId: process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder',
+      keyId: process.env.RAZORPAY_KEY_ID,
     });
   } catch (err: any) {
-    res.status(400).json({ success: false, message: err.message });
+    for (const reserved of reservedItems) {
+      await CropListing.findByIdAndUpdate(reserved.listingId, {
+        $inc: {
+          availableQuantity: reserved.quantity,
+          reservedQuantity: -reserved.quantity,
+        },
+      });
+    }
+
+    const statusCode = err.statusCode || err.status || 500;
+    res.status(statusCode === 401 ? 401 : statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
+      success: false,
+      message: err.message || 'Could not create Razorpay order.',
+    });
   }
 }
 

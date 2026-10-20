@@ -56,13 +56,22 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Healthcheck
 app.get('/api/health', (_req, res) => {
+  const razorpayKeyId = process.env.RAZORPAY_KEY_ID;
+  const razorpayMode = razorpayKeyId?.startsWith('rzp_live_')
+    ? 'Live Mode'
+    : razorpayKeyId?.startsWith('rzp_test_')
+      ? 'Test Mode'
+      : razorpayKeyId
+        ? 'Configured'
+        : 'Unconfigured';
+
   res.json({
     status: 'healthy',
     platform: 'AgriConnect — From Farm to Every Table',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
     realtime: 'Socket.IO active',
-    razorpay: process.env.RAZORPAY_KEY_ID ? 'Configured (Test Mode)' : 'Unconfigured',
+    razorpay: razorpayKeyId ? `Configured (${razorpayMode})` : razorpayMode,
   });
 });
 // Root endpoint – simple health/info response
