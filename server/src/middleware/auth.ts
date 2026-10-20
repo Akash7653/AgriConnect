@@ -7,7 +7,18 @@ export interface AuthRequest extends Request {
   user?: IUser;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'agriconnect_jwt_super_secret_dev_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (
+  process.env.NODE_ENV === 'production' &&
+  (!JWT_SECRET || JWT_SECRET.length < 32 || /^(replace_|your_|change_me|<)/i.test(JWT_SECRET) || JWT_SECRET === 'agriconnect_jwt_super_secret_dev_2026')
+) {
+  throw new Error('A strong JWT_SECRET is required in production.');
+}
+
+const signingSecret = JWT_SECRET || 'agriconnect_jwt_super_secret_dev_2026';
+const JWT_ISSUER = 'agriconnect-api';
+const JWT_AUDIENCE = 'agriconnect-web';
 
 export function signToken(user: IUser): string {
   return jwt.sign(
@@ -17,9 +28,17 @@ export function signToken(user: IUser): string {
       role: user.role,
       name: user.name,
     },
-    JWT_SECRET,
-    { expiresIn: '7d' }
+    signingSecret,
+    { algorithm: 'HS256', expiresIn: '15m', issuer: JWT_ISSUER, audience: JWT_AUDIENCE }
   );
+}
+
+export function verifyAccessToken(token: string): { userId: string } {
+  return jwt.verify(token, signingSecret, {
+    algorithms: ['HS256'],
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+  }) as { userId: string };
 }
 
 export async function authenticateToken(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
@@ -32,7 +51,7 @@ export async function authenticateToken(req: AuthRequest, res: Response, next: N
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+    const decoded = verifyAccessToken(token);
     const user = await User.findById(decoded.userId);
 
     if (!user) {
@@ -77,7 +96,7 @@ export async function optionalAuth(req: AuthRequest, _res: Response, next: NextF
 
   if (token) {
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+      const decoded = verifyAccessToken(token);
       const user = await User.findById(decoded.userId);
       if (user && user.status !== 'suspended') {
         req.user = user;

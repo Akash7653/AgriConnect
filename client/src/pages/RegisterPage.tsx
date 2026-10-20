@@ -1,33 +1,20 @@
 import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, EyeOff, Lock, Mail, User, Loader2, Sprout, Store, Truck } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, Lock, Mail, User, Loader2 } from 'lucide-react';
 import { AuthLayout } from '@/components/auth/AuthLayout';
 import { Input } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
-import type { UserRole } from '@/types';
-import { classNames } from '@/utils';
-
-const roles: { value: UserRole; label: string; icon: typeof Sprout; desc: string }[] = [
-  { value: 'farmer', label: 'Farmer / FPO', icon: Sprout, desc: 'List and sell harvests' },
-  { value: 'buyer', label: 'Buyer', icon: Store, desc: 'Procure fresh produce' },
-  { value: 'logistics', label: 'Logistics Partner', icon: Truck, desc: 'Move produce' },
-];
 
 export function RegisterPage() {
   const { signUp, isBackendConfigured } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const initialRole = (params.get('role') as UserRole) ?? 'farmer';
-  const validInitial = roles.some((r) => r.value === initialRole) ? initialRole : 'farmer';
-
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [role, setRole] = useState<UserRole>(validInitial);
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -43,8 +30,8 @@ export function RegisterPage() {
       setError('Please enter a valid phone number with at least 10 digits.');
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+    if (password.length < 12) {
+      setError('Password must be at least 12 characters.');
       return;
     }
     if (password !== confirm) {
@@ -59,7 +46,7 @@ export function RegisterPage() {
     }
     setLoading(true);
     try {
-      await signUp({ fullName, email, password, phone, role });
+      await signUp({ fullName, email, password, phone });
       showToast('Your account was created successfully.', 'success');
       navigate('/dashboard');
     } catch (err) {
@@ -85,36 +72,9 @@ export function RegisterPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
-        <div>
-          <label className="block text-sm font-medium text-forest mb-2">I am a…</label>
-          <div className="grid grid-cols-3 gap-2">
-            {roles.map((r) => (
-              <button
-                key={r.value}
-                type="button"
-                onClick={() => setRole(r.value)}
-                className={classNames(
-                  'rounded-xl border p-3 text-center transition-all',
-                  role === r.value
-                    ? 'border-agri-emerald bg-agri-emerald/10'
-                    : 'border-forest/15 hover:border-forest/30'
-                )}
-              >
-                <r.icon
-                  className={classNames(
-                    'h-5 w-5 mx-auto mb-1.5',
-                    role === r.value ? 'text-agri-emerald' : 'text-charcoal/50'
-                  )}
-                  strokeWidth={1.5}
-                />
-                <p className="text-xs font-medium text-forest leading-tight">{r.label}</p>
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-charcoal/50">
-            {roles.find((r) => r.value === role)?.desc}. Admin accounts cannot be self-assigned.
-          </p>
-        </div>
+        <p className="rounded-lg bg-forest/5 p-3 text-sm text-charcoal/65">
+          This creates a customer account. Farmer, business, and delivery access requires separate admin approval.
+        </p>
 
         <Input
           label="Full name"
@@ -150,7 +110,7 @@ export function RegisterPage() {
             name="password"
             type={show ? 'text' : 'password'}
             autoComplete="new-password"
-            placeholder="At least 8 characters"
+            placeholder="At least 12 characters"
             icon={<Lock className="h-4 w-4" />}
             value={password}
             onChange={(e) => setPassword(e.target.value)}

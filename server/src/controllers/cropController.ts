@@ -96,28 +96,30 @@ export async function createListing(req: AuthRequest, res: Response): Promise<vo
 
 export async function getListings(req: Request, res: Response): Promise<void> {
   try {
-    const {
-      search,
-      category,
-      grade,
-      state,
-      district,
-      organic,
-      minPrice,
-      maxPrice,
-      sortBy = 'createdAt',
-      order = 'desc',
-      page = '1',
-      limit = '20',
-    } = req.query;
+    const filters = z.object({
+      search: z.string().trim().max(100).optional(),
+      category: z.string().max(40).optional(),
+      grade: z.enum(['A+', 'A', 'B+', 'B', 'All']).optional(),
+      state: z.string().trim().max(80).optional(),
+      district: z.string().trim().max(80).optional(),
+      organic: z.enum(['true', 'false']).optional(),
+      minPrice: z.coerce.number().int().min(0).optional(),
+      maxPrice: z.coerce.number().int().min(0).optional(),
+      sortBy: z.enum(['createdAt', 'price_asc', 'price_desc', 'quantity_desc']).default('createdAt'),
+      order: z.enum(['asc', 'desc']).default('desc'),
+      page: z.coerce.number().int().min(1).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+    }).strict().parse(req.query);
+    const { search, category, grade, state, district, organic, minPrice, maxPrice, sortBy, order, page, limit } = filters;
 
     const query: any = { status: 'active', availableQuantity: { $gt: 0 } };
 
-    if (search && typeof search === 'string') {
+    if (search) {
+      const safeSearch = escapeRegex(search);
       query.$or = [
-        { cropName: { $regex: search, $options: 'i' } },
-        { variety: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
+        { cropName: { $regex: safeSearch, $options: 'i' } },
+        { variety: { $regex: safeSearch, $options: 'i' } },
+        { description: { $regex: safeSearch, $options: 'i' } },
       ];
     }
 
@@ -147,8 +149,8 @@ export async function getListings(req: Request, res: Response): Promise<void> {
       if (maxPrice) query.pricePerUnitPaise.$lte = Number(maxPrice);
     }
 
-    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
+    const pageNum = page;
+    const limitNum = limit;
     const skip = (pageNum - 1) * limitNum;
 
     const sortOptions: any = {};
@@ -183,12 +185,16 @@ export async function getListings(req: Request, res: Response): Promise<void> {
   }
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export async function getListingById(req: Request, res: Response): Promise<void> {
   try {
     const { id } = req.params;
     const listing = await CropListing.findById(id)
-      .populate('farmerId', 'name phone email isVerified')
-      .populate('farmerProfileId');
+      .populate('farmerId', 'name isVerified')
+      .populate('farmerProfileId', 'farmName fpoAffiliation location');
 
     if (!listing) {
       res.status(404).json({ success: false, message: 'Crop listing not found' });

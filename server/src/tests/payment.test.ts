@@ -7,7 +7,10 @@ import { CropListing } from '../models/CropListing.js';
 import { Order } from '../models/Order.js';
 import { seedDatabase } from '../scripts/seed.js';
 
+const testSeedPassword = crypto.randomBytes(32).toString('base64url');
+
 beforeAll(async () => {
+  process.env.SEED_PASSWORD = testSeedPassword;
   await connectDB();
   await seedDatabase();
 }, 30000);
@@ -26,7 +29,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
   it('1. Should authenticate buyer and fetch test crop listing', async () => {
     const buyerRes = await request(app).post('/api/auth/login').send({
       email: 'buyer@agriconnect.in',
-      password: 'AgriConnect2026!',
+      password: testSeedPassword,
     });
     expect(buyerRes.status).toBe(200);
     buyerToken = buyerRes.body.token;
@@ -130,9 +133,10 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
     const validPaymentId = `pay_test_${Date.now()}`;
 
     // Compute genuine HMAC SHA256 signature using the configured test secret
-    const secret = process.env.RAZORPAY_KEY_SECRET || 'htDwjL8qE2xCQuli66YjJvXd';
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    expect(secret).toBeTruthy();
     const validSignature = crypto
-      .createHmac('sha256', secret)
+      .createHmac('sha256', secret!)
       .update(`${validRzpOrderId}|${validPaymentId}`)
       .digest('hex');
 

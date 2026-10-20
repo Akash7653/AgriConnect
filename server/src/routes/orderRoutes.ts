@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import {
-  createOrder,
   getBuyerOrders,
   getFarmerOrders,
   getOrderById,
@@ -12,7 +11,12 @@ const router = Router();
 
 router.use(authenticateToken);
 
-router.post('/', createOrder);
+router.post('/', (_req, res) => {
+  res.status(410).json({
+    success: false,
+    message: 'Direct order creation is disabled. Use Razorpay checkout to create and verify payment orders.',
+  });
+});
 router.get('/buyer', getBuyerOrders);
 router.get('/farmer', getFarmerOrders);
 router.get('/:id', getOrderById);

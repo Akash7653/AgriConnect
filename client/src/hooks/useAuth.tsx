@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthService } from '@/services/api';
-import type { AuthSession, User, UserRole } from '@/types';
+import type { AuthSession, User } from '@/types';
 
 interface AuthContextValue {
   user: User | null;
@@ -13,7 +13,6 @@ interface AuthContextValue {
     email: string;
     password: string;
     phone: string;
-    role: UserRole;
   }) => Promise<void>;
   signOut: () => void;
 }

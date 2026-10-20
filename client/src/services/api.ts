@@ -61,7 +61,6 @@ export const AuthService = {
     email: string;
     password: string;
     phone: string;
-    role: UserRole;
   }): Promise<AuthSession> {
     if (!AppConfig.isBackendConfigured) {
       throw new ApiError(
@@ -76,7 +75,6 @@ export const AuthService = {
         email: payload.email,
         password: payload.password,
         phone: payload.phone,
-        role: payload.role,
       }),
     });
   },

@@ -41,10 +41,8 @@ function mapListing(listing: ProductListResponse['listings'][number]): CropProdu
     origin: [listing.location?.district, listing.location?.state].filter(Boolean).join(', '),
     farmerName: listing.farmerId?.name ?? 'Verified farmer',
     imageUrl: listing.images?.[0] ?? 'https://images.unsplash.com/photo-1597362925123-77861d3fbac7?auto=format&fit=crop&w=800&q=80',
-    rating: 5,
     harvestDate: listing.harvestDate ?? new Date().toISOString(),
     isOrganic: Boolean(listing.isOrganicCertified),
-    isDemoData: false,
   };
 }
 

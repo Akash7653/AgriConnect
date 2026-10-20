@@ -10,28 +10,39 @@ import { AuditLog } from '../models/AuditLog.js';
 
 export const registerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
-  role: z.enum([USER_ROLES.FARMER, USER_ROLES.BUYER, USER_ROLES.BUSINESS, USER_ROLES.LOGISTICS]),
-  phone: z.string().min(10, 'Phone number must be at least 10 digits'),
+  email: z.string().email('Invalid email address').max(254),
+  password: z.string().min(12, 'Password must be at least 12 characters').max(128),
+  phone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/, 'Invalid phone number'),
   language: z.enum(['en', 'te', 'hi']).default('en'),
-  // Farmer specific fields
-  farmName: z.string().optional(),
-  village: z.string().optional(),
-  district: z.string().optional(),
-  state: z.string().optional(),
-  pinCode: z.string().optional(),
-  fpoAffiliation: z.string().optional(),
-  // Business specific fields
-  businessType: z.enum(['household', 'restaurant', 'hotel', 'supermarket', 'institution', 'retailer']).optional(),
-  businessName: z.string().optional(),
-  gstNumber: z.string().optional(),
-});
+}).strict();
 
 export const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
+  email: z.string().email().max(254),
+  password: z.string().min(1).max(128),
+}).strict();
+
+const profileUpdateSchema = z.object({
+  name: z.string().min(2).max(100).optional(),
+  phone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/).optional(),
+  language: z.enum(['en', 'te', 'hi']).optional(),
+  address: z.object({
+    street: z.string().max(120).optional(),
+    villageOrCity: z.string().max(80).optional(),
+    district: z.string().max(80).optional(),
+    state: z.string().max(80).optional(),
+    pinCode: z.string().min(5).max(12).optional(),
+  }).strict().optional(),
+}).strict();
+
+const seededDemoAccounts = new Set([
+  'admin@agriconnect.in',
+  'farmer@agriconnect.in',
+  'ramesh.farmer@agriconnect.in',
+  'lakshmi.farmer@agriconnect.in',
+  'buyer@agriconnect.in',
+  'business@agriconnect.in',
+  'logistics@agriconnect.in',
+]);
 
 export async function register(req: Request, res: Response): Promise<void> {
   try {
@@ -43,64 +54,26 @@ export async function register(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const salt = await bcrypt.genSalt(10);
+    const salt = await bcrypt.genSalt(12);
     const passwordHash = await bcrypt.hash(data.password, salt);
 
     const user = await User.create({
       name: data.name,
       email: data.email.toLowerCase(),
       passwordHash,
-      role: data.role,
+      role: USER_ROLES.BUYER,
       phone: data.phone,
       language: data.language,
-      isVerified: data.role === USER_ROLES.BUYER, // Household buyers verified by default; farmers/businesses require verification
+      isVerified: true,
       status: 'active',
-      address: {
-        villageOrCity: data.village || '',
-        district: data.district || '',
-        state: data.state || '',
-        pinCode: data.pinCode || '',
-      },
     });
 
     // Create role-specific profile
-    if (data.role === USER_ROLES.FARMER) {
-      await FarmerProfile.create({
-        userId: user._id,
-        farmName: data.farmName || `${data.name}'s Farm`,
-        fpoAffiliation: data.fpoAffiliation || '',
-        location: {
-          village: data.village || 'Village',
-          district: data.district || 'District',
-          state: data.state || 'Telangana',
-          pinCode: data.pinCode || '500001',
-        },
-        primaryCrops: [],
-        kycDetails: {
-          verificationStatus: 'pending',
-        },
-      });
-    } else if (data.role === USER_ROLES.BUYER || data.role === USER_ROLES.BUSINESS) {
+    if (user.role === USER_ROLES.BUYER) {
       await BuyerProfile.create({
         userId: user._id,
-        buyerType: data.role === USER_ROLES.BUSINESS ? data.businessType || 'restaurant' : 'household',
-        businessName: data.businessName,
-        gstNumber: data.gstNumber,
-        deliveryAddresses: data.pinCode
-          ? [
-              {
-                label: 'Primary',
-                recipientName: data.name,
-                phone: data.phone,
-                addressLine1: data.village || 'Main Street',
-                city: data.district || 'City',
-                district: data.district || 'District',
-                state: data.state || 'State',
-                pinCode: data.pinCode,
-                isDefault: true,
-              },
-            ]
-          : [],
+        buyerType: 'household',
+        deliveryAddresses: [],
       });
     }
 
@@ -137,6 +110,11 @@ export async function register(req: Request, res: Response): Promise<void> {
 export async function login(req: Request, res: Response): Promise<void> {
   try {
     const data = loginSchema.parse(req.body);
+
+    if (process.env.NODE_ENV === 'production' && seededDemoAccounts.has(data.email.toLowerCase())) {
+      res.status(401).json({ success: false, message: 'Invalid email or password' });
+      return;
+    }
 
     const user = await User.findOne({ email: data.email.toLowerCase() });
     if (!user) {
@@ -226,7 +204,7 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const { name, phone, language, address, farmDetails, bankDetails, businessDetails } = req.body;
+    const { name, phone, language, address } = profileUpdateSchema.parse(req.body);
 
     if (name) req.user.name = name;
     if (phone) req.user.phone = phone;
@@ -234,27 +212,6 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
     if (address) req.user.address = { ...req.user.address, ...address };
 
     await req.user.save();
-
-    if (req.user.role === USER_ROLES.FARMER) {
-      const updateDoc: any = {};
-      if (farmDetails) {
-        if (farmDetails.farmName) updateDoc.farmName = farmDetails.farmName;
-        if (farmDetails.fpoAffiliation) updateDoc.fpoAffiliation = farmDetails.fpoAffiliation;
-        if (farmDetails.landSizeAcres) updateDoc.landSizeAcres = farmDetails.landSizeAcres;
-        if (farmDetails.farmingPractice) updateDoc.farmingPractice = farmDetails.farmingPractice;
-        if (farmDetails.location) updateDoc.location = farmDetails.location;
-      }
-      if (bankDetails) {
-        updateDoc.bankDetails = bankDetails;
-      }
-      await FarmerProfile.findOneAndUpdate({ userId: req.user._id }, { $set: updateDoc });
-    }
-
-    if (req.user.role === USER_ROLES.BUYER || req.user.role === USER_ROLES.BUSINESS) {
-      if (businessDetails) {
-        await BuyerProfile.findOneAndUpdate({ userId: req.user._id }, { $set: businessDetails });
-      }
-    }
 
     res.json({ success: true, message: 'Profile updated successfully' });
   } catch (err: any) {

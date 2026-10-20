@@ -48,20 +48,6 @@ India’s agricultural supply chain has historically been fragmented: farmers ro
 
 ---
 
-## 3. Demo Accounts & One-Click Role Switcher
-
-The application includes a **Top Demo Quick-Switcher** that allows instant switching between all 5 roles without typing passwords:
-
-| Role | Demo Email | Password | Primary Feature Highlights |
-| :--- | :--- | :--- | :--- |
-| **👑 Admin** | `admin@agriconnect.in` | `AgriConnect2026!` | GMV tracking, 90/8/2 fee configuration, Farmer KYC approval, Audit logs |
-| **🌾 Farmer (FPO Lead)** | `farmer@agriconnect.in` | `AgriConnect2026!` | Publish crop batches, concurrency inventory, order fulfillment, 90% transparent payout ledger |
-| **🛒 Household Buyer** | `buyer@agriconnect.in` | `AgriConnect2026!` | Fresh produce catalog, real-time cart, slot checkout, live delivery stepper, tax invoices |
-| **🏨 B2B Buyer** | `business@agriconnect.in` | `AgriConnect2026!` | Commercial bulk purchasing, RFQ quote requests, recurring schedules, GST invoices |
-| **🚚 Logistics Partner** | `logistics@agriconnect.in` | `AgriConnect2026!` | Farm gate collections, transit dispatch, proof of delivery (signature/OTP), status broadcasts |
-
----
-
 ## 4. Transparent 90/8/2 Pricing Model
 
 AgriConnect uses integer **paise** for all financial calculations to prevent floating point inaccuracies. An immutable pricing snapshot is committed with every order:
@@ -97,11 +83,12 @@ npm run install:all
 ```
 
 ### 2. Environment Configuration
-The server automatically falls back to an in-memory MongoDB instance for instant local development if `MONGODB_URI` is omitted.
+In development and tests, the server can use an in-memory MongoDB instance when `MONGODB_URI` is omitted or unavailable. Production requires MongoDB Atlas and will fail startup if it cannot connect. Seed data is development-only and is never automatically created in production.
 To configure external services:
 ```bash
 cp server/.env.example server/.env
 ```
+Set `SEED_PASSWORD` in that local file before first startup if you want development seed accounts. Production never runs the seed script.
 
 ### 3. Run Development Servers
 ```bash
@@ -121,9 +108,9 @@ AgriConnect integrates official Razorpay Standard Checkout with cryptographic se
 
 ### Backend Environment Variables
 ```env
-MONGODB_URI=mongodb+srv://rajeshamkoravena111_db_user:lhPRX2lVqtyQLZOK@cluster0.acyhioz.mongodb.net/?appName=Cluster0
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<database>
 PORT=5000
-JWT_SECRET=agriconnect_super_secret_jwt_key_2026_production
+JWT_SECRET=replace_with_at_least_32_random_characters
 CLIENT_URL=http://localhost:3000
 NODE_ENV=development
 
@@ -137,9 +124,9 @@ RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
 1. **Pay Now & Order Creation (`POST /api/payment/create-order`)**:
    - Calculates total amount on the server from DB-persisted prices, delivery fees, and platform splits in integer **paise**.
    - Concurrency-safe atomic stock reservation (`$inc: { availableQuantity: -qty, reservedQuantity: +qty }`).
-   - Generates authentic Razorpay test order.
+   - Generates a Razorpay order using development Test Mode or production Live Mode credentials.
 2. **Standard Razorpay Modal**:
-   - Pops up official Razorpay Modal (`checkout.js`) with public Test Key ID.
+   - Pops up official Razorpay Modal (`checkout.js`) with the server-configured public key ID.
 3. **Server-Side Cryptographic Verification (`POST /api/payment/verify`)**:
    - Computes `crypto.createHmac('sha256', secret).update(order_id + '|' + payment_id).digest('hex')`.
    - Compares with constant-time equality check (`crypto.timingSafeEqual`).
@@ -157,7 +144,7 @@ RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
 ### How to Configure Webhook After Backend Deployment
 1. Deploy your backend to your cloud host (Render, Railway, AWS).
 2. Obtain your production backend URL (e.g. `https://api.agriconnect.in`).
-3. In the Razorpay Dashboard (Test Mode -> Settings -> Webhooks):
+3. In the Razorpay Dashboard, select the same mode as the deployed backend and open Settings -> Webhooks:
    - **Webhook URL**: `https://api.agriconnect.in/api/payment/webhook`
    - **Secret**: Generate a strong random secret.
    - **Active Events**: Check `payment.captured`, `payment.failed`, and `order.paid`.

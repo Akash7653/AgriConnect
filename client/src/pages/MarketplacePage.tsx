@@ -3,11 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Search, ShoppingCart, Trash2, Minus, Plus, X, ShoppingBag, Loader2, CheckCircle2, Sparkles } from 'lucide-react';
 import { ProductCard } from '@/components/marketplace/ProductCard';
+import { LocationSelector } from '@/components/marketplace/LocationSelector';
 import { ProductsService } from '@/services/products';
 import { useCart } from '@/hooks/useCart';
 import { useToast } from '@/hooks/useToast';
 import { useAuth } from '@/hooks/useAuth';
 import { PaymentService, playPaymentSuccessSound, type DeliveryAddress } from '@/services/payment';
+import { subscribeRealtime } from '@/services/realtime';
 import type { CropProduct, ProductCategory } from '@/types';
 import { formatCurrency, classNames } from '@/utils';
 
@@ -94,6 +96,16 @@ export function MarketplacePage() {
       .catch(() => setError('Could not load products. Please try again.'))
       .finally(() => setLoading(false));
   }, [category, query]);
+
+  useEffect(() => {
+    if (!session) return;
+    return subscribeRealtime(session.token, () => {
+      ProductsService.list({
+        category: category === 'all' ? undefined : category,
+        query: query || undefined,
+      }).then(setProducts).catch(() => setError('Live inventory refresh failed.'));
+    });
+  }, [category, query, session]);
 
   return (
     <div className="min-w-0 max-w-full overflow-hidden bg-ivory">
@@ -349,6 +361,17 @@ function CartDrawer({
                   <h3 className="font-display text-2xl text-forest mt-4">Delivery details</h3>
                   <p className="text-sm text-charcoal/60 mt-1">Your details are sent securely with the order.</p>
                 </div>
+                <LocationSelector
+                  onResolved={(resolved) =>
+                    setAddress((current) => ({
+                      ...current,
+                      city: resolved.city,
+                      district: resolved.district,
+                      state: resolved.state,
+                      pinCode: resolved.pinCode,
+                    }))
+                  }
+                />
                 <div className="grid grid-cols-2 gap-3">
                   {([
                     ['recipientName', 'Full name'],

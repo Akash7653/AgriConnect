@@ -299,9 +299,8 @@ export async function getOrderById(req: AuthRequest, res: Response): Promise<voi
     const isFarmerInOrder = order.items.some((i) => i.farmerId.toString() === req.user!._id.toString());
     const isLogisticsAssigned = order.logistics?.assignedPartnerId?.toString() === req.user._id.toString();
     const isAdmin = req.user.role === USER_ROLES.ADMIN;
-    const isAnyLogistics = req.user.role === USER_ROLES.LOGISTICS;
 
-    if (!isBuyer && !isFarmerInOrder && !isLogisticsAssigned && !isAdmin && !isAnyLogistics) {
+    if (!isBuyer && !isFarmerInOrder && !isLogisticsAssigned && !isAdmin) {
       res.status(403).json({ success: false, message: 'Access denied to this order' });
       return;
     }
@@ -328,6 +327,25 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
       return;
     }
 
+    const isBuyer = order.buyerId.toString() === req.user._id.toString();
+    const isFarmerInOrder = order.items.some((item) => item.farmerId.toString() === req.user!._id.toString());
+    const isLogisticsAssigned = order.logistics?.assignedPartnerId?.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === USER_ROLES.ADMIN;
+
+    if (!isAdmin && !isBuyer && !isFarmerInOrder && !isLogisticsAssigned) {
+      res.status(403).json({ success: false, message: 'Access denied to update this order' });
+      return;
+    }
+
+    if (isBuyer && status !== ORDER_STATUSES.CANCELLED) {
+      res.status(403).json({ success: false, message: 'Buyers may only cancel their own orders' });
+      return;
+    }
+    if (status === ORDER_STATUSES.CANCELLED && order.payment.status === 'captured') {
+      res.status(409).json({ success: false, message: 'Paid orders require an approved refund workflow before cancellation.' });
+      return;
+    }
+
     // Validate state machine transitions
     const validTransitions: Record<string, string[]> = {
       [ORDER_STATUSES.PENDING_PAYMENT]: [ORDER_STATUSES.CONFIRMED, ORDER_STATUSES.CANCELLED],
@@ -341,15 +359,24 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
       [ORDER_STATUSES.CANCELLED]: [],
     };
 
-    if (req.user.role !== USER_ROLES.ADMIN) {
-      const allowed = validTransitions[order.status] || [];
-      if (!allowed.includes(status)) {
-        res.status(400).json({
-          success: false,
-          message: `Invalid status transition from ${order.status} to ${status}`,
-        });
-        return;
-      }
+    const allowed = validTransitions[order.status] || [];
+    if (!allowed.includes(status)) {
+      res.status(400).json({
+        success: false,
+        message: `Invalid status transition from ${order.status} to ${status}`,
+      });
+      return;
+    }
+
+    const farmerStatuses = [ORDER_STATUSES.ACCEPTED, ORDER_STATUSES.PREPARING, ORDER_STATUSES.READY_FOR_PICKUP];
+    const logisticsStatuses = [ORDER_STATUSES.PICKED_UP, ORDER_STATUSES.OUT_FOR_DELIVERY, ORDER_STATUSES.DELIVERED];
+    if (isFarmerInOrder && !isAdmin && !farmerStatuses.includes(status as any)) {
+      res.status(403).json({ success: false, message: 'Farmers can only advance preparation states.' });
+      return;
+    }
+    if (isLogisticsAssigned && !isAdmin && !logisticsStatuses.includes(status as any)) {
+      res.status(403).json({ success: false, message: 'Delivery partners can only advance delivery states.' });
+      return;
     }
 
     // If order is cancelled, release reserved stock back to available stock

@@ -50,10 +50,21 @@ export async function seedDatabaseIfEmpty(): Promise<void> {
     await ensureBudgetListing();
     return;
   }
+  if (!process.env.SEED_PASSWORD) {
+    console.warn('Seed skipped: configure SEED_PASSWORD to create local development accounts.');
+    return;
+  }
   await seedDatabase();
 }
 
 export async function seedDatabase(): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Seed data is disabled in production.');
+  }
+  if (!process.env.SEED_PASSWORD) {
+    throw new Error('SEED_PASSWORD is required to create local development accounts.');
+  }
+
   console.log('Seeding AgriConnect database with realistic agricultural ecosystem data...');
 
   // 1. System Settings
@@ -72,7 +83,7 @@ export async function seedDatabase(): Promise<void> {
   );
 
   const salt = await bcrypt.genSalt(10);
-  const commonPassword = await bcrypt.hash('AgriConnect2026!', salt);
+  const commonPassword = await bcrypt.hash(process.env.SEED_PASSWORD, salt);
 
   // 2. Create Users
   // Admin
@@ -666,14 +677,7 @@ export async function seedDatabase(): Promise<void> {
   });
 
   console.log('✅ AgriConnect Seed successfully initialized!');
-  console.log('====================================================');
-  console.log('Demo Credentials (Password for all: AgriConnect2026!):');
-  console.log('👑 Admin:     admin@agriconnect.in');
-  console.log('🌾 Farmer:    farmer@agriconnect.in (Nandhu Farmer)');
-  console.log('🛒 Buyer:     buyer@agriconnect.in (Priya Sharma)');
-  console.log('🏨 B2B Buyer: business@agriconnect.in (Royal Deccan Restaurant)');
-  console.log('🚚 Logistics: logistics@agriconnect.in (Suresh Express)');
-  console.log('====================================================');
+  console.log('Development seed users created. Credentials are documented in the local development guide.');
 }
 
 // Allow direct CLI execution: npm run seed

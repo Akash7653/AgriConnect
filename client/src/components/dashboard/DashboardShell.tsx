@@ -17,7 +17,6 @@ import {
   Package,
   ClipboardList,
   LogOut,
-  Info,
   MoreHorizontal,
 } from 'lucide-react';
 import type { UserRole } from '@/types';
@@ -144,9 +143,7 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
               {subtitle && <p className="text-sm text-charcoal/55 hidden sm:block">{subtitle}</p>}
             </div>
           </div>
-          <span className="text-xs bg-soil/10 text-soil-dark px-3 py-1.5 rounded-full flex items-center gap-1.5">
-            <Info className="h-3 w-3" /> Demo data
-          </span>
+          <span className="text-xs text-charcoal/45">Live account</span>
         </header>
 
         <main className="p-5 pb-24 sm:p-8 sm:pb-24 lg:pb-8">

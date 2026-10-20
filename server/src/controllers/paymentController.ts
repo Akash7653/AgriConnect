@@ -15,6 +15,7 @@ import {
   fetchPaymentFromRazorpay,
 } from '../services/razorpay.js';
 import { RealtimeNotifier } from '../socket/index.js';
+import { checkServiceability } from '../services/serviceability.js';
 
 export const createPaymentOrderSchema = z.object({
   items: z
@@ -52,6 +53,12 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
     }
 
     const data = createPaymentOrderSchema.parse(req.body);
+
+    const serviceability = await checkServiceability(data.deliveryAddress);
+    if (serviceability.configured && !serviceability.serviceable) {
+      res.status(422).json({ success: false, message: serviceability.message });
+      return;
+    }
 
     // Concurrency-safe atomic stock reservation
     const orderItems: IOrderItem[] = [];
@@ -248,6 +255,11 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
+    if (order.buyerId.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      res.status(403).json({ success: false, message: 'You are not authorized to verify this order.' });
+      return;
+    }
+
     // Idempotent check: already paid
     if (order.payment.status === 'captured') {
       res.json({
@@ -299,6 +311,21 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
       await order.save();
       res.status(400).json({ success: false, message: 'Invalid payment signature' });
       return;
+    }
+
+    if (process.env.NODE_ENV !== 'test') {
+      const payment = await fetchPaymentFromRazorpay(razorpayPaymentId);
+      const paymentMatchesOrder =
+        payment &&
+        payment.order_id === razorpayOrderId &&
+        Number(payment.amount) === order.pricing.finalPayablePaise &&
+        payment.currency === 'INR' &&
+        ['authorized', 'captured'].includes(payment.status);
+
+      if (!paymentMatchesOrder) {
+        res.status(400).json({ success: false, message: 'Payment details do not match the stored order.' });
+        return;
+      }
     }
 
     // Verified successfully
@@ -381,7 +408,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
   // Fail closed if webhook secret is not configured
-  if (!webhookSecret || webhookSecret === 'your_webhook_secret' || webhookSecret.trim() === '') {
+  if (!webhookSecret || /^(replace_|your_|change_me|<)/i.test(webhookSecret) || webhookSecret.trim() === '') {
     res.status(503).json({
       success: false,
       message: 'Razorpay webhook verification is not configured on this server.',
@@ -412,7 +439,15 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
     return;
   }
 
-  const eventId = req.headers['x-razorpay-event-id'] as string || event?.id || `evt_${Date.now()}`;
+  const eventId = req.headers['x-razorpay-event-id'] as string || event?.id;
+  if (!eventId || typeof eventId !== 'string' || eventId.length > 200) {
+    res.status(400).json({ success: false, message: 'Missing or invalid Razorpay event ID.' });
+    return;
+  }
+  const eventType = typeof event.event === 'string' ? event.event : 'unknown';
+  const paymentPayload = event.payload?.payment?.entity;
+  const orderPayload = event.payload?.order?.entity;
+  const razorpayOrderId = paymentPayload?.order_id || (eventType === 'order.paid' ? orderPayload?.id : undefined);
 
   // Deduplication
   const existingEvent = await WebhookEvent.findOne({ eventId });
@@ -421,20 +456,42 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
     return;
   }
 
-  await WebhookEvent.create({
-    eventId,
-    eventType: event.event || 'unknown',
-    payload: event,
-    status: 'processed',
-  });
-
-  const eventType = event.event;
-  const paymentPayload = event.payload?.payment?.entity;
-  const razorpayOrderId = paymentPayload?.order_id;
+  const safePayload = {
+    payment: paymentPayload ? {
+      id: paymentPayload.id,
+      order_id: paymentPayload.order_id,
+      amount: paymentPayload.amount,
+      currency: paymentPayload.currency,
+      status: paymentPayload.status,
+      error_code: paymentPayload.error_code,
+    } : undefined,
+    order: orderPayload ? {
+      id: orderPayload.id,
+      amount: orderPayload.amount,
+      currency: orderPayload.currency,
+      status: orderPayload.status,
+    } : undefined,
+  };
+  try {
+    await WebhookEvent.create({ eventId, eventType, payload: safePayload, status: 'processed' });
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      res.json({ success: true, message: 'Event already processed (duplicate)' });
+      return;
+    }
+    throw error;
+  }
 
   if (eventType === 'payment.captured' || eventType === 'order.paid') {
     if (razorpayOrderId) {
       const order = await Order.findOne({ 'payment.paymentOrderId': razorpayOrderId });
+      const paidAmount = Number(paymentPayload?.amount ?? orderPayload?.amount);
+      const paidCurrency = paymentPayload?.currency ?? orderPayload?.currency;
+      if (!order || paidAmount !== order.pricing.finalPayablePaise || paidCurrency !== 'INR') {
+        await WebhookEvent.updateOne({ eventId }, { $set: { status: 'failed' } });
+        res.status(400).json({ success: false, message: 'Webhook payment does not match a stored order.' });
+        return;
+      }
       if (order && order.payment.status !== 'captured') {
         order.payment.status = 'captured';
         order.payment.transactionId = paymentPayload?.id || order.payment.transactionId;

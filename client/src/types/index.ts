@@ -23,10 +23,8 @@ export interface CropProduct {
   origin: string;
   farmerName: string;
   imageUrl: string;
-  rating: number;
   harvestDate: string;
   isOrganic: boolean;
-  isDemoData: boolean;
 }
 
 export type ProductCategory =
@@ -47,47 +45,14 @@ export interface CartItem {
   imageUrl: string;
 }
 
-export type OrderStatus =
-  | 'pending'
-  | 'confirmed'
-  | 'harvesting'
-  | 'in_transit'
-  | 'delivered'
-  | 'cancelled';
-
 export interface Order {
-  id: string;
+  _id: string;
+  orderNumber: string;
   buyerName: string;
-  farmerName: string;
-  items: { name: string; quantity: number; unit: string }[];
-  totalAmount: number;
-  currency: string;
+  items: { cropName: string; quantity: number; unit: string; farmerName: string }[];
+  pricing: { finalPayablePaise: number };
   status: OrderStatus;
-  placedAt: string;
-  deliveryDate?: string;
-  isDemoData: boolean;
+  createdAt: string;
 }
 
-export interface PayoutLedgerEntry {
-  id: string;
-  orderId: string;
-  cropName: string;
-  amount: number;
-  currency: string;
-  status: 'pending' | 'processed' | 'paid';
-  date: string;
-  isDemoData: boolean;
-}
-
-export interface LogisticsTask {
-  id: string;
-  type: 'pickup' | 'delivery';
-  origin: string;
-  destination: string;
-  contactName: string;
-  contactPhone: string;
-  scheduledAt: string;
-  status: 'assigned' | 'in_progress' | 'completed';
-  cargoKg: number;
-  isDemoData: boolean;
-}
+export type OrderStatus = 'pending_payment' | 'confirmed' | 'accepted' | 'preparing' | 'ready_for_pickup' | 'picked_up' | 'out_for_delivery' | 'delivered' | 'cancelled';

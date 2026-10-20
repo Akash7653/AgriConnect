@@ -4,7 +4,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 let mongoMemoryServer: MongoMemoryServer | null = null;
 
 export async function connectDB(): Promise<string> {
-  const customUri = process.env.MONGODB_URI;
+  const customUri = process.env.NODE_ENV === 'test' ? undefined : process.env.MONGODB_URI;
 
   // If a URI is provided, attempt to connect to MongoDB Atlas
   if (customUri) {
@@ -17,8 +17,15 @@ export async function connectDB(): Promise<string> {
       return customUri;
     } catch (err: any) {
       console.error('❌ Failed to connect to MongoDB Atlas:', err.message);
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('MongoDB Atlas connection failed in production. Refusing to use an in-memory database.');
+      }
       // Fall back to in‑memory DB for development after a failed Atlas connection
     }
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('MONGODB_URI is required in production.');
   }
 
   // No URI set or Atlas connection failed – use in‑memory MongoDB (useful for local dev/testing)

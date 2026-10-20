@@ -1,16 +1,20 @@
 import { Server as HttpServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
+import { Order } from '../models/Order.js';
+import { verifyAccessToken } from '../middleware/auth.js';
 
 let ioInstance: SocketIOServer | null = null;
 
-const JWT_SECRET = process.env.JWT_SECRET || 'agriconnect_jwt_super_secret_dev_2026';
-
 export function initSocketIO(httpServer: HttpServer): SocketIOServer {
+  const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   ioInstance = new SocketIOServer(httpServer, {
     cors: {
-      origin: '*',
+      origin: allowedOrigins,
       methods: ['GET', 'POST'],
     },
     transports: ['websocket', 'polling'],
@@ -25,24 +29,18 @@ export function initSocketIO(httpServer: HttpServer): SocketIOServer {
         socket.handshake.query?.token;
 
       if (!token || typeof token !== 'string') {
-        // Allow anonymous guest connection for public marketplace inventory updates
-        socket.data.isGuest = true;
-        return next();
+        return next(new Error('Authentication required'));
       }
 
-      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+      const decoded = verifyAccessToken(token);
       const user = await User.findById(decoded.userId).select('_id name email role isVerified');
-      if (user) {
-        socket.data.user = user;
-        socket.data.isGuest = false;
-      } else {
-        socket.data.isGuest = true;
+      if (!user || user.status === 'suspended') {
+        return next(new Error('Invalid or suspended account'));
       }
+      socket.data.user = user;
       next();
-    } catch (err) {
-      // If token invalid, default to guest rather than crashing socket
-      socket.data.isGuest = true;
-      next();
+    } catch {
+      next(new Error('Invalid or expired token'));
     }
   });
 
@@ -59,13 +57,16 @@ export function initSocketIO(httpServer: HttpServer): SocketIOServer {
       // Join role room
       socket.join(`role:${user.role}`);
       console.log(`Socket connected: ${user.name} (${user.role}) - ID: ${socket.id}`);
-    } else {
-      console.log(`Guest socket connected - ID: ${socket.id}`);
     }
 
-    // Client can explicitly subscribe to an order room if authorized
-    socket.on('join:order', (orderId: string) => {
-      if (user && orderId) {
+    socket.on('join:order', async (orderId: string) => {
+      if (!user || !orderId) return;
+      const order = await Order.findById(orderId).select('buyerId items.farmerId');
+      if (!order) return;
+      const isAdmin = user.role === 'admin';
+      const isBuyer = order.buyerId.toString() === user._id.toString();
+      const isFarmer = order.items.some((item) => item.farmerId.toString() === user._id.toString());
+      if (isAdmin || isBuyer || isFarmer) {
         socket.join(`order:${orderId}`);
       }
     });

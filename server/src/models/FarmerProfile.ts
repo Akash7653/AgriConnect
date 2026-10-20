@@ -80,7 +80,7 @@ const FarmerProfileSchema = new Schema<IFarmerProfile>(
       bankName: { type: String, default: '' },
       upiId: { type: String, default: '' },
     },
-    rating: { type: Number, default: 4.8 },
+    rating: { type: Number, default: 0, min: 0, max: 5 },
     totalOrdersFulfilled: { type: Number, default: 0 },
     totalRevenuePaise: { type: Number, default: 0 },
   },

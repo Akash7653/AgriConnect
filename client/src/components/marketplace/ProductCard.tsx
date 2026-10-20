@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Plus, Star, MapPin, Sprout } from 'lucide-react';
+import { Plus, MapPin, Sprout } from 'lucide-react';
 import type { CropProduct } from '@/types';
 import { useCart } from '@/hooks/useCart';
 import { useToast } from '@/hooks/useToast';
@@ -33,10 +33,6 @@ export function ProductCard({ product, index }: { product: CropProduct; index: n
         />
         <div className="absolute top-3 left-3 flex gap-2">
           {product.isOrganic && <Badge tone="emerald">Organic</Badge>}
-        </div>
-        <div className="absolute top-3 right-3 flex items-center gap-1 bg-forest/80 text-ivory px-2.5 py-1 rounded-full text-xs">
-          <Star className="h-3 w-3 fill-agri-emerald text-agri-emerald" />
-          {product.rating}
         </div>
       </div>
 
