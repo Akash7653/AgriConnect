@@ -6,6 +6,19 @@ import { Input } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
 
+function registrationRoleLabel(role: 'buyer' | 'farmer' | 'business' | 'logistics'): string {
+  switch (role) {
+    case 'farmer':
+      return 'Farmer / Seller';
+    case 'business':
+      return 'Business buyer';
+    case 'logistics':
+      return 'Delivery partner';
+    case 'buyer':
+      return 'Buyer';
+  }
+}
+
 export function RegisterPage() {
   const { signUp, isBackendConfigured } = useAuth();
   const { showToast } = useToast();
@@ -61,7 +74,7 @@ export function RegisterPage() {
       showToast(
         role === 'buyer'
           ? 'Your buyer account was created successfully.'
-          : `Your buyer account is ready. Your ${role} access request is pending admin approval.`,
+          : `Your buyer account is ready. Your ${registrationRoleLabel(role)} access request is pending admin approval.`,
         'success'
       );
       navigate('/dashboard');
@@ -97,7 +110,7 @@ export function RegisterPage() {
             className="mt-1 w-full rounded-lg border border-forest/15 bg-ivory px-3 py-2.5"
           >
             <option value="buyer">Buyer</option>
-            <option value="farmer">Farmer / FPO</option>
+            <option value="farmer">Farmer / Seller</option>
             <option value="business">Business buyer</option>
             <option value="logistics">Delivery partner</option>
           </select>
@@ -105,7 +118,7 @@ export function RegisterPage() {
         <p className="rounded-lg bg-forest/5 p-3 text-sm text-charcoal/65">
           {role === 'buyer'
             ? 'Buyer access is available after registration.'
-            : `You can use buyer features immediately. ${role === 'farmer' ? 'Farmer' : role === 'business' ? 'Business buyer' : 'Delivery partner'} features become available after an administrator reviews and approves your request.`}
+            : `You can use buyer features immediately. ${registrationRoleLabel(role)} features become available after an administrator reviews and approves your request.`}
         </p>
         {role === 'farmer' && (
           <fieldset className="grid gap-3 rounded-xl border border-forest/10 p-4 sm:grid-cols-2">
