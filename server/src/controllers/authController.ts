@@ -9,6 +9,14 @@ import { signToken, AuthRequest } from '../middleware/auth.js';
 import { USER_ROLES } from '../config/constants.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { SEEDED_DEMO_ACCOUNT_EMAILS } from '../config/demoAccounts.js';
+import {
+  isVerificationDeliveryConfigured,
+  sendEmailVerification,
+  sendPhoneVerification,
+  VerificationError,
+  verifyEmailToken,
+  verifyPhoneCode,
+} from '../services/accountVerification.js';
 
 export const registerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -47,6 +55,19 @@ const passwordResetSchema = z.object({
   password: z.string().min(12, 'Password must be at least 12 characters').max(128),
 }).strict();
 
+const verificationEmailSchema = z.object({
+  email: z.string().email().max(254),
+}).strict();
+
+const verificationTokenSchema = z.object({
+  token: z.string().min(32).max(128),
+}).strict();
+
+const verificationPhoneSchema = z.object({
+  email: z.string().email().max(254),
+  code: z.string().regex(/^\d{4,8}$/, 'Enter the numeric code from your SMS.'),
+}).strict();
+
 const profileUpdateSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   phone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/).optional(),
@@ -63,6 +84,14 @@ const profileUpdateSchema = z.object({
 export async function register(req: Request, res: Response): Promise<void> {
   try {
     const data = registerSchema.parse(req.body);
+    if (!isVerificationDeliveryConfigured()) {
+      res.status(503).json({
+        success: false,
+        code: 'VERIFICATION_NOT_CONFIGURED',
+        message: 'Email and phone verification are not configured. Please try again later.',
+      });
+      return;
+    }
 
     const existingUser = await User.findOne({ email: data.email.toLowerCase() });
     if (existingUser) {
@@ -82,17 +111,21 @@ export async function register(req: Request, res: Response): Promise<void> {
       ...(data.role === USER_ROLES.FARMER && data.farm ? { requestedFarm: data.farm } : {}),
       phone: data.phone,
       language: data.language,
-      isVerified: true,
+      isVerified: false,
+      emailVerified: false,
+      phoneVerified: false,
       status: data.role === USER_ROLES.BUYER ? 'active' : 'pending_verification',
     });
 
-    // Create role-specific profile
+    const deliveries = await Promise.allSettled([
+      sendEmailVerification(user._id.toString()),
+      sendPhoneVerification(user._id.toString()),
+    ]);
+    const emailSent = deliveries[0].status === 'fulfilled';
+    const phoneCodeSent = deliveries[1].status === 'fulfilled';
+
     if (user.role === USER_ROLES.BUYER) {
-      await BuyerProfile.create({
-        userId: user._id,
-        buyerType: 'household',
-        deliveryAddresses: [],
-      });
+      await BuyerProfile.create({ userId: user._id, buyerType: 'household', deliveryAddresses: [] });
     }
 
     await AuditLog.create({
@@ -104,12 +137,12 @@ export async function register(req: Request, res: Response): Promise<void> {
       ipAddress: req.ip,
     });
 
-    const token = signToken(user);
-
-    res.status(201).json({
+    res.status(emailSent && phoneCodeSent ? 201 : 202).json({
       success: true,
-      message: 'Account registered successfully',
-      token,
+      message: emailSent && phoneCodeSent
+        ? 'Account created. Verify your email and phone to sign in.'
+        : 'Account created, but one or more verification messages could not be sent. Use the resend options to try again.',
+      verification: { emailSent, phoneCodeSent },
       user: {
         id: user._id,
         name: user.name,
@@ -121,6 +154,8 @@ export async function register(req: Request, res: Response): Promise<void> {
         phone: user.phone,
         language: user.language,
         isVerified: user.isVerified,
+        emailVerified: user.emailVerified,
+        phoneVerified: user.phoneVerified,
         address: user.address,
       },
     });
@@ -147,6 +182,15 @@ export async function login(req: Request, res: Response): Promise<void> {
     const isMatch = await bcrypt.compare(data.password, user.passwordHash);
     if (!isMatch) {
       res.status(401).json({ success: false, message: 'Invalid email or password' });
+      return;
+    }
+
+    if (!user.emailVerified || !user.phoneVerified) {
+      res.status(403).json({
+        success: false,
+        code: 'CONTACT_VERIFICATION_REQUIRED',
+        message: 'Verify your email address and phone number before signing in.',
+      });
       return;
     }
 
@@ -180,11 +224,99 @@ export async function login(req: Request, res: Response): Promise<void> {
         phone: user.phone,
         language: user.language,
         isVerified: user.isVerified,
+        emailVerified: user.emailVerified,
+        phoneVerified: user.phoneVerified,
         address: user.address,
       },
     });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+async function resolveVerificationUser(email: string) {
+  return User.findOne({ email: email.toLowerCase() });
+}
+
+export async function resendEmailVerification(req: Request, res: Response): Promise<void> {
+  const parsed = verificationEmailSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+    return;
+  }
+  try {
+    const user = await resolveVerificationUser(parsed.data.email);
+    if (user && !user.emailVerified) await sendEmailVerification(user._id.toString());
+    res.status(202).json({ success: true, message: 'If email verification is pending, a link will be sent.' });
+  } catch (error) {
+    if (error instanceof VerificationError) {
+      res.status(error.statusCode).json({ success: false, code: error.category.toUpperCase(), message: error.message });
+      return;
+    }
+    console.error('[auth] Email verification resend failed', { category: 'database_error' });
+    res.status(500).json({ success: false, message: 'Could not resend the email verification link.' });
+  }
+}
+
+export async function resendPhoneVerification(req: Request, res: Response): Promise<void> {
+  const parsed = verificationEmailSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+    return;
+  }
+  try {
+    const user = await resolveVerificationUser(parsed.data.email);
+    if (user && !user.phoneVerified) await sendPhoneVerification(user._id.toString());
+    res.status(202).json({ success: true, message: 'If phone verification is pending, an SMS code will be sent.' });
+  } catch (error) {
+    if (error instanceof VerificationError) {
+      res.status(error.statusCode).json({ success: false, code: error.category.toUpperCase(), message: error.message });
+      return;
+    }
+    console.error('[auth] SMS verification resend failed', { category: 'database_error' });
+    res.status(500).json({ success: false, message: 'Could not resend the phone verification code.' });
+  }
+}
+
+export async function confirmEmailVerification(req: Request, res: Response): Promise<void> {
+  const parsed = verificationTokenSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, message: 'The email verification link is invalid or expired.' });
+    return;
+  }
+  try {
+    const result = await verifyEmailToken(parsed.data.token);
+    res.json({ success: true, message: 'Email verified.', ...result });
+  } catch (error) {
+    if (error instanceof VerificationError) {
+      res.status(error.statusCode).json({ success: false, code: error.category.toUpperCase(), message: error.message });
+      return;
+    }
+    console.error('[auth] Email verification failed', { category: 'database_error' });
+    res.status(500).json({ success: false, message: 'Could not verify your email. Request a new link and try again.' });
+  }
+}
+
+export async function confirmPhoneVerification(req: Request, res: Response): Promise<void> {
+  const parsed = verificationPhoneSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, message: 'Enter your email and the numeric SMS code.' });
+    return;
+  }
+  try {
+    const result = await verifyPhoneCode(parsed.data.email, parsed.data.code);
+    res.json({
+      success: true,
+      message: result.emailVerified ? 'Email and phone verified. You can sign in.' : 'Phone verified. Verify your email before signing in.',
+      ...result,
+    });
+  } catch (error) {
+    if (error instanceof VerificationError) {
+      res.status(error.statusCode).json({ success: false, code: error.category.toUpperCase(), message: error.message });
+      return;
+    }
+    console.error('[auth] Phone verification failed', { category: 'database_error' });
+    res.status(500).json({ success: false, message: 'Could not verify your phone. Request a new code and try again.' });
   }
 }
 
@@ -333,6 +465,8 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
         phone: req.user.phone,
         language: req.user.language,
         isVerified: req.user.isVerified,
+        emailVerified: req.user.emailVerified,
+        phoneVerified: req.user.phoneVerified,
         status: req.user.status,
         address: req.user.address,
         createdAt: req.user.createdAt,
@@ -354,7 +488,10 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
     const { name, phone, language, address } = profileUpdateSchema.parse(req.body);
 
     if (name) req.user.name = name;
-    if (phone) req.user.phone = phone;
+    if (phone && phone !== req.user.phone) {
+      req.user.phone = phone;
+      req.user.phoneVerified = false;
+    }
     if (language) req.user.language = language;
     if (address) req.user.address = { ...req.user.address, ...address };
 

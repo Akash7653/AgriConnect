@@ -3,10 +3,12 @@ import type { AuthSession, User } from '@/types';
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status = 0) {
+  code?: string;
+  constructor(message: string, status = 0, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -26,16 +28,18 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const res = await fetch(url, { ...rest, headers: mergedHeaders });
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
+    let code: string | undefined;
     try {
       const body = await res.json();
       const serverMessage = body.message;
+      code = typeof body.code === 'string' ? body.code : undefined;
       message = typeof serverMessage === 'string' && serverMessage.trim().startsWith('[')
         ? 'Please check your details and try again.'
         : serverMessage ?? message;
     } catch {
       /* ignore */
     }
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, code);
   }
   return (await res.json()) as T;
 }
@@ -43,6 +47,12 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 interface AuthResponse {
   token: string;
   user: Partial<User> & { email: string; name?: string };
+}
+
+interface RegistrationResponse {
+  success: boolean;
+  message: string;
+  verification: { emailSent: boolean; phoneCodeSent: boolean };
 }
 
 export const AuthService = {
@@ -76,6 +86,34 @@ export const AuthService = {
     });
   },
 
+  async resendEmailVerification(email: string): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/verification/email/resend', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async resendPhoneVerification(email: string): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/verification/phone/resend', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async confirmEmailVerification(token: string): Promise<{ email: string; emailVerified: boolean; phoneVerified: boolean }> {
+    return request<{ email: string; emailVerified: boolean; phoneVerified: boolean }>('/auth/verification/email/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  },
+
+  async confirmPhoneVerification(email: string, code: string): Promise<{ emailVerified: boolean; phoneVerified: boolean }> {
+    return request<{ emailVerified: boolean; phoneVerified: boolean }>('/auth/verification/phone/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ email, code }),
+    });
+  },
+
   async register(payload: {
     fullName: string;
     email: string;
@@ -89,14 +127,14 @@ export const AuthService = {
       state: string;
       pinCode: string;
     };
-  }): Promise<AuthSession> {
+  }): Promise<RegistrationResponse> {
     if (!AppConfig.isBackendConfigured) {
       throw new ApiError(
         'Backend not configured. Registration requires VITE_API_BASE_URL to be set.',
         0
       );
     }
-    const response = await request<AuthResponse>('/auth/register', {
+    return request<RegistrationResponse>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({
         name: payload.fullName,
@@ -107,7 +145,6 @@ export const AuthService = {
         ...(payload.farm ? { farm: payload.farm } : {}),
       }),
     });
-    return { token: response.token, user: AuthService.mapUser(response.user) };
   },
 
   persistSession(session: AuthSession) {
@@ -138,6 +175,8 @@ export const AuthService = {
       ...(u.requestedRole ? { requestedRole: u.requestedRole } : {}),
       ...(u.status ? { status: u.status } : {}),
       ...(typeof u.isVerified === 'boolean' ? { isVerified: u.isVerified } : {}),
+      ...(typeof u.emailVerified === 'boolean' ? { emailVerified: u.emailVerified } : {}),
+      ...(typeof u.phoneVerified === 'boolean' ? { phoneVerified: u.phoneVerified } : {}),
       ...(u.requestedFarm ? { requestedFarm: u.requestedFarm } : {}),
       ...(u.address ? { address: u.address } : {}),
     };

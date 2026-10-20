@@ -102,11 +102,14 @@ test('mobile storefront and buyer shopping flow work across common widths', asyn
     await expect(page.getByRole('img', { name: 'AgriConnect animated logo' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Fresh listings from verified farms.' })).toBeVisible();
     await expect(page.locator('footer')).toBeHidden();
-    const topMenu = page.getByRole('button', { name: 'Toggle menu' });
-    await expect(topMenu).toBeVisible();
-    await topMenu.click();
-    await expect(page.getByRole('link', { name: 'Shop categories' })).toBeVisible();
-    await page.getByRole('button', { name: 'Toggle menu' }).click();
+    const buyerNavigation = page.getByRole('navigation', { name: 'Buyer navigation' });
+    await expect(buyerNavigation.getByRole('link', { name: 'Home' })).toBeVisible();
+    await expect(buyerNavigation.getByRole('link', { name: 'Categories' })).toBeVisible();
+    await expect(buyerNavigation.getByRole('link', { name: 'Orders' })).toBeVisible();
+    await expect(buyerNavigation.getByRole('link', { name: /Cart/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Open account' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Continue shopping' })).toBeVisible();
+    await page.getByRole('button', { name: 'Open account' }).click();
     await expect(page.getByText('Hyderabad, Hyderabad, Telangana')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Offers and campaigns' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Verified tomato campaign' })).toBeVisible();
@@ -156,9 +159,8 @@ test('mobile storefront and buyer shopping flow work across common widths', asyn
     const bottomNav = page.getByRole('navigation', { name: 'Buyer navigation' });
     await expect(bottomNav.getByRole('link', { name: 'Home' })).toBeVisible();
     await expect(bottomNav.getByRole('link', { name: 'Categories' })).toBeVisible();
-    await expect(bottomNav.getByRole('link', { name: 'Search' })).toBeVisible();
     await expect(bottomNav.getByRole('link', { name: 'Orders' })).toBeVisible();
-    await expect(bottomNav.getByRole('link', { name: 'Account' })).toBeVisible();
+    await expect(bottomNav.getByRole('link', { name: 'Cart, 2 items' })).toBeVisible();
 
     await page.reload();
     await expect(page.getByRole('button', { name: 'Open cart, 2 items' })).toBeVisible();
@@ -169,12 +171,13 @@ test('mobile storefront and buyer shopping flow work across common widths', asyn
     await page.getByRole('button', { name: 'Grains & cereals' }).click();
     await expect(page).toHaveURL(/category=grains/);
     await expect(page.getByText('Millet', { exact: true })).toBeVisible();
-    await bottomNav.getByRole('link', { name: 'Search' }).click();
-    await expect(page).toHaveURL(/#product-search$/);
-    await expect(page.locator('#product-search')).toBeVisible();
+    const marketplaceSearch = page.getByRole('textbox', { name: 'Search crops, farmers, or regions' });
+    await marketplaceSearch.fill('Millet');
+    await expect(page.getByText('Millet', { exact: true })).toBeVisible();
+    await marketplaceSearch.fill('');
 
-    const openCart = page.getByRole('button', { name: /Open cart/ });
-    await openCart.click();
+    await bottomNav.getByRole('link', { name: 'Cart, 2 items' }).click();
+    await expect(page).toHaveURL(/#cart$/);
     await expect(page.getByRole('heading', { name: 'Your Cart' })).toBeVisible();
     const cart = page.locator('aside');
     await expect(cart.getByText('Tomatoes', { exact: true })).toBeVisible();

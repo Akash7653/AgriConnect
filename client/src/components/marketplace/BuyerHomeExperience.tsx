@@ -43,13 +43,34 @@ export function BuyerHomeExperience() {
   const [campaignError, setCampaignError] = useState('');
   const [locationOpen, setLocationOpen] = useState(false);
   const [manualLocation, setManualLocation] = useState({ city: '', district: '', state: '', pinCode: '' });
-  const [guestLocation, setGuestLocation] = useState<{ city: string; district: string; state: string; pinCode: string } | null>(null);
+  const [guestLocation, setGuestLocation] = useState<{ city: string; district: string; state: string; pinCode: string } | null>(() => {
+    try {
+      const saved = localStorage.getItem('agriconnect-delivery-location');
+      if (!saved) return null;
+      const location = JSON.parse(saved) as { city?: unknown; district?: unknown; state?: unknown; pinCode?: unknown };
+      if (
+        typeof location.city === 'string' &&
+        typeof location.district === 'string' &&
+        typeof location.state === 'string' &&
+        typeof location.pinCode === 'string'
+      ) {
+        return { city: location.city, district: location.district, state: location.state, pinCode: location.pinCode };
+      }
+      console.warn('Saved delivery location was incomplete and has been ignored.');
+    } catch (error) {
+      console.warn('Saved delivery location could not be read.', error);
+    }
+    return null;
+  });
+  const [categoryFilter, setCategoryFilter] = useState<ProductCategory | undefined>();
   const [locationError, setLocationError] = useState('');
   const [serviceabilityMessage, setServiceabilityMessage] = useState('');
   const [savingLocation, setSavingLocation] = useState(false);
 
   const user = session?.user;
   const address = user?.address;
+  const deliveryState = address?.state || guestLocation?.state;
+  const deliveryDistrict = address?.district || guestLocation?.district;
   const addressLabel = [address?.villageOrCity, address?.district, address?.state].filter(Boolean).join(', ')
     || [guestLocation?.city, guestLocation?.district, guestLocation?.state].filter(Boolean).join(', ');
   const categories = useMemo(() => {
@@ -105,9 +126,10 @@ export function BuyerHomeExperience() {
     setError('');
     const timeout = window.setTimeout(() => {
       ProductsService.list(session, {
+        category: categoryFilter,
         query: query.trim() || undefined,
-        state: address?.state,
-        district: address?.district,
+        state: deliveryState,
+        district: deliveryDistrict,
         limit: session ? 100 : 24,
       })
         .then((items) => { if (active) setProducts(items); })
@@ -120,9 +142,9 @@ export function BuyerHomeExperience() {
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [session, query, address?.district, address?.state, retryCount]);
+  }, [session, query, categoryFilter, deliveryDistrict, deliveryState, retryCount]);
 
-  async function saveLocation(location: { city: string; district: string; state: string; pinCode: string; displayName?: string }) {
+  async function saveLocation(location: { city: string; district: string; state: string; pinCode: string; displayName?: string }): Promise<boolean> {
     setSavingLocation(true);
     setLocationError('');
     setServiceabilityMessage('');
@@ -157,17 +179,37 @@ export function BuyerHomeExperience() {
         });
       } else {
         setGuestLocation(location);
+        try {
+          localStorage.setItem('agriconnect-delivery-location', JSON.stringify({
+            city: location.city,
+            district: location.district,
+            state: location.state,
+            pinCode: location.pinCode,
+          }));
+        } catch (storageError) {
+          setLocationError('This location is selected for now, but could not be saved on this device.');
+          console.error('Could not persist guest delivery location.', storageError);
+          return false;
+        }
       }
       setServiceabilityMessage(statusMessage);
       setLocationOpen(false);
+      return true;
     } catch (saveError) {
       setLocationError(saveError instanceof Error ? saveError.message : 'Could not save this delivery location.');
+      return false;
     } finally {
       setSavingLocation(false);
     }
   }
 
   function browseCategory(category?: ProductCategory, search?: string) {
+    if (!session) {
+      setCategoryFilter(category);
+      setQuery(search ?? '');
+      document.getElementById('fresh-listings-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     const params = new URLSearchParams();
     if (category) params.set('category', category);
     if (search) params.set('search', search);
@@ -368,7 +410,7 @@ export function BuyerHomeExperience() {
             <LocationSelector onResolved={(resolved) => {
               const fields = { city: resolved.city, district: resolved.district, state: resolved.state, pinCode: resolved.pinCode };
               setManualLocation(fields);
-              void saveLocation({ ...fields, displayName: resolved.displayName });
+              return saveLocation({ ...fields, displayName: resolved.displayName });
             }} />
             <form onSubmit={(event) => { event.preventDefault(); void saveLocation(manualLocation); }} className="mt-4 space-y-3">
               <p className="text-sm font-semibold">Or enter it manually</p>

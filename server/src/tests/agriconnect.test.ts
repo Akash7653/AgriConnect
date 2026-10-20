@@ -13,6 +13,7 @@ import { EmailOutbox } from '../models/EmailOutbox.js';
 import { queueOrderConfirmation, processEmailOutbox } from '../services/email.js';
 import bcrypt from 'bcryptjs';
 import { AuditLog } from '../models/AuditLog.js';
+import { BuyerProfile } from '../models/BuyerProfile.js';
 
 const testSeedPassword = randomBytes(32).toString('base64url');
 
@@ -414,6 +415,7 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         },
         display_name: 'Test City, Test State',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
       .mockResolvedValueOnce(new Response('', { status: 503 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -447,7 +449,65 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     }
   });
 
+  it('9b. Categorizes geocoding rate limits, timeouts, network failures, and malformed results', async () => {
+    const previousProvider = process.env.GEOCODING_PROVIDER;
+    process.env.GEOCODING_PROVIDER = 'nominatim';
+    const warningLog = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '2', 'x-request-id': 'geo-rate-limit-1' } }))
+      .mockRejectedValueOnce(Object.assign(new Error('provider timeout'), { name: 'TimeoutError' }))
+      .mockRejectedValueOnce(new Error('network disconnected'))
+      .mockResolvedValueOnce(new Response('not-json', { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ address: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const rateLimited = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ latitude: 18.5, longitude: 73.8 });
+      expect(rateLimited.status).toBe(503);
+      expect(rateLimited.body.code).toBe('LOCATION_RATE_LIMITED');
+      expect(rateLimited.headers['retry-after']).toBe('2');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const timedOut = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ latitude: 18.5, longitude: 73.8 });
+      expect(timedOut.status).toBe(502);
+      expect(timedOut.body.code).toBe('LOCATION_TIMEOUT');
+
+      const networkFailure = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ latitude: 18.5, longitude: 73.8 });
+      expect(networkFailure.status).toBe(502);
+      expect(networkFailure.body.code).toBe('LOCATION_NETWORK_ERROR');
+
+      const malformedResult = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ latitude: 18.5, longitude: 73.8 });
+      expect(malformedResult.status).toBe(502);
+      expect(malformedResult.body.code).toBe('LOCATION_MALFORMED_RESPONSE');
+
+      const incompleteResult = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ latitude: 18.5, longitude: 73.8 });
+      expect(incompleteResult.status).toBe(422);
+      expect(incompleteResult.body.code).toBe('LOCATION_INCOMPLETE_RESULT');
+    } finally {
+      vi.unstubAllGlobals();
+      warningLog.mockRestore();
+      if (previousProvider === undefined) delete process.env.GEOCODING_PROVIDER;
+      else process.env.GEOCODING_PROVIDER = previousProvider;
+    }
+  }, 15000);
+
   it('10. Should reject admin self-registration and keep requested role access pending approval', async () => {
+    vi.stubEnv('RESEND_API_KEY', 'test-resend-key');
+    vi.stubEnv('RESEND_FROM_EMAIL', 'AgriConnect <verify@example.test>');
+    vi.stubEnv('MSG91_AUTH_KEY', 'test-msg91-key');
+    vi.stubEnv('MSG91_OTP_TEMPLATE_ID', 'test-template');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ type: 'success', id: 'verification-test' })));
+
     const res = await request(app).post('/api/auth/register').send({
       name: 'Untrusted Role User',
       email: `role-test-${Date.now()}@example.com`,
@@ -543,6 +603,123 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .send({ role: 'logistics' });
     expect(manualApproval.status).toBe(200);
     expect(manualApproval.body.user.role).toBe('logistics');
+    const manuallyApprovedUser = await User.findById(customerRegistration.body.user.id);
+    expect(manuallyApprovedUser?.emailVerified).toBe(false);
+    expect(manuallyApprovedUser?.phoneVerified).toBe(false);
+    await User.updateOne(
+      { _id: customerRegistration.body.user.id },
+      { $set: { emailVerified: true, phoneVerified: true } }
+    );
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('10b. Should not create an account when email and SMS verification providers are unconfigured', async () => {
+    vi.stubEnv('RESEND_API_KEY', '');
+    vi.stubEnv('RESEND_FROM_EMAIL', '');
+    vi.stubEnv('MSG91_AUTH_KEY', '');
+    vi.stubEnv('MSG91_OTP_TEMPLATE_ID', '');
+    const email = `verification-unconfigured-${randomBytes(8).toString('hex')}@example.test`;
+    try {
+      const response = await request(app).post('/api/auth/register').send({
+        name: 'Unconfigured Verification User',
+        email,
+        password: 'VerificationPassword123!',
+        phone: '9876543210',
+      });
+      expect(response.status).toBe(503);
+      expect(response.body.code).toBe('VERIFICATION_NOT_CONFIGURED');
+      expect(await User.findOne({ email })).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('10a. Requires one-time email and SMS verification before login', async () => {
+    vi.stubEnv('RESEND_API_KEY', 'test-resend-key');
+    vi.stubEnv('RESEND_FROM_EMAIL', 'AgriConnect <verify@example.test>');
+    vi.stubEnv('MSG91_AUTH_KEY', 'test-msg91-key');
+    vi.stubEnv('MSG91_OTP_TEMPLATE_ID', 'test-template');
+    let emailBody = '';
+    const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).startsWith('https://api.resend.com/emails')) {
+        emailBody = String(init?.body);
+      }
+      return Response.json({ type: 'success', id: 'verification-test' });
+    });
+    vi.stubGlobal('fetch', providerFetch);
+
+    const email = `contact-verification-${randomBytes(8).toString('hex')}@example.test`;
+    try {
+      const registration = await request(app).post('/api/auth/register').send({
+        name: 'Contact Verification User',
+        email,
+        password: 'VerificationPassword123!',
+        phone: '9876543210',
+      });
+      expect(registration.status).toBe(201);
+      expect(registration.body.token).toBeUndefined();
+      expect(registration.body.verification).toEqual({ emailSent: true, phoneCodeSent: true });
+
+      const user = await User.findOne({ email });
+      expect(user?.emailVerified).toBe(false);
+      expect(user?.phoneVerified).toBe(false);
+      expect(user?.isVerified).toBe(false);
+
+      const unverifiedLogin = await request(app).post('/api/auth/login').send({
+        email,
+        password: 'VerificationPassword123!',
+      });
+      expect(unverifiedLogin.status).toBe(403);
+      expect(unverifiedLogin.body.code).toBe('CONTACT_VERIFICATION_REQUIRED');
+
+      const emailLink = JSON.parse(emailBody).text.match(/https?:\/\/\S+/)?.[0] as string;
+      const emailToken = new URLSearchParams(new URL(emailLink).hash.slice(1)).get('token');
+      expect(emailToken).toBeTruthy();
+      const storedToken = await User.findById(user!._id).select('+emailVerificationTokenHash');
+      expect(storedToken?.emailVerificationTokenHash).not.toBe(emailToken);
+
+      const emailVerification = await request(app)
+        .post('/api/auth/verification/email/confirm')
+        .send({ token: emailToken });
+      expect(emailVerification.status).toBe(200);
+      expect(emailVerification.body.emailVerified).toBe(true);
+      expect(emailVerification.body.phoneVerified).toBe(false);
+
+      const phoneVerification = await request(app)
+        .post('/api/auth/verification/phone/confirm')
+        .send({ email, code: '123456' });
+      expect(phoneVerification.status).toBe(200);
+      expect(phoneVerification.body).toMatchObject({ emailVerified: true, phoneVerified: true });
+      const phoneVerifyRequest = providerFetch.mock.calls.find(([input]) =>
+        String(input).includes('/api/v5/otp/verify?otp=123456&mobile=919876543210')
+      );
+      expect(phoneVerifyRequest?.[1]).toMatchObject({
+        method: 'GET',
+        headers: { authkey: 'test-msg91-key' },
+      });
+
+      const verifiedLogin = await request(app).post('/api/auth/login').send({
+        email,
+        password: 'VerificationPassword123!',
+      });
+      expect(verifiedLogin.status).toBe(200);
+      expect(verifiedLogin.body.token).toBeTruthy();
+
+      const reusedEmailToken = await request(app)
+        .post('/api/auth/verification/email/confirm')
+        .send({ token: emailToken });
+      expect(reusedEmailToken.status).toBe(400);
+    } finally {
+      const user = await User.findOne({ email });
+      if (user) {
+        await BuyerProfile.deleteMany({ userId: user._id });
+        await AuditLog.deleteMany({ userId: user._id });
+        await User.deleteOne({ _id: user._id });
+      }
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 
   it('9. Should allow admin assignment and only the assigned driver to complete delivery', async () => {

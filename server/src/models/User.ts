@@ -7,6 +7,12 @@ export interface IUser extends Document {
   passwordHash: string;
   passwordResetTokenHash?: string;
   passwordResetExpiresAt?: Date;
+  emailVerified: boolean;
+  phoneVerified: boolean;
+  emailVerificationTokenHash?: string;
+  emailVerificationExpiresAt?: Date;
+  emailVerificationLastSentAt?: Date;
+  phoneVerificationLastSentAt?: Date;
   role: UserRole;
   requestedRole?: Exclude<UserRole, 'admin'>;
   requestedFarm?: {
@@ -39,6 +45,12 @@ const UserSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true },
     passwordResetTokenHash: { type: String, select: false },
     passwordResetExpiresAt: { type: Date, select: false },
+    emailVerified: { type: Boolean, default: true },
+    phoneVerified: { type: Boolean, default: true },
+    emailVerificationTokenHash: { type: String, select: false },
+    emailVerificationExpiresAt: { type: Date, select: false },
+    emailVerificationLastSentAt: { type: Date, select: false },
+    phoneVerificationLastSentAt: { type: Date, select: false },
     role: {
       type: String,
       enum: Object.values(USER_ROLES),

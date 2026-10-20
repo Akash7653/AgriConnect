@@ -5,6 +5,7 @@ import { AuthLayout } from '@/components/auth/AuthLayout';
 import { Input } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
+import { ApiError } from '@/services/api';
 
 export function LoginPage() {
   const { signIn, isBackendConfigured } = useAuth();
@@ -16,10 +17,12 @@ export function LoginPage() {
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [needsVerification, setNeedsVerification] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setNeedsVerification(false);
     if (!email || !password) {
       setError('Please enter both email and password.');
       return;
@@ -38,6 +41,7 @@ export function LoginPage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign in failed.';
       setError(message);
+      setNeedsVerification(err instanceof ApiError && err.code === 'CONTACT_VERIFICATION_REQUIRED');
       showToast(message, 'error');
     } finally {
       setLoading(false);
@@ -96,7 +100,9 @@ export function LoginPage() {
 
         {error && (
           <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-600">
-            {error}
+            {error}{needsVerification && (
+              <> <Link to="/verify-account" state={{ email }} className="font-semibold underline">Continue verification</Link>.</>
+            )}
           </div>
         )}
 

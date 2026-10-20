@@ -1,6 +1,6 @@
 export interface Session {
   token: string;
-  user: { id: string; email: string; name: string; role: string };
+  user: { id: string; email: string; name: string; role: string; phone?: string };
 }
 
 export interface Product {
@@ -15,6 +15,13 @@ export interface Product {
   images?: string[];
 }
 
+export class ApiError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 const apiUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
 
 export async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
@@ -27,8 +34,8 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, tok
       ...options.headers,
     },
   });
-  const body = await response.json().catch(() => ({})) as { message?: string };
-  if (!response.ok) throw new Error(body.message || `Request failed (${response.status}).`);
+  const body = await response.json().catch(() => ({})) as { message?: string; code?: string };
+  if (!response.ok) throw new ApiError(body.message || `Request failed (${response.status}).`, body.code);
   return body as T;
 }
 

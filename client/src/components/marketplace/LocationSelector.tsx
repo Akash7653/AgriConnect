@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
-import { request } from '@/services/api';
+import { ApiError, request } from '@/services/api';
 
 interface ResolvedAddress {
   city: string;
@@ -11,13 +11,21 @@ interface ResolvedAddress {
 }
 
 interface LocationSelectorProps {
-  onResolved: (address: ResolvedAddress) => void;
+  onResolved: (address: ResolvedAddress) => void | boolean | Promise<void | boolean>;
 }
+
+class IncompleteAddressError extends Error {}
+class LocationSaveError extends Error {}
 
 export function LocationSelector({ onResolved }: LocationSelectorProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [detectedAddress, setDetectedAddress] = useState<ResolvedAddress | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
+  const attemptId = useRef(0);
+
+  useEffect(() => () => {
+    attemptId.current += 1;
+  }, []);
 
   function detectLocation() {
     if (!navigator.geolocation) {
@@ -25,8 +33,10 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
       return;
     }
 
+    const currentAttempt = ++attemptId.current;
     setBusy(true);
     setMessage('Requesting your location…');
+    setCanRetry(false);
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
         try {
@@ -34,16 +44,38 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
             method: 'POST',
             body: JSON.stringify({ latitude: coords.latitude, longitude: coords.longitude }),
           });
-          setDetectedAddress(result.address);
-          setMessage('Location found. Confirm it before continuing.');
+          if (currentAttempt !== attemptId.current) return;
+
+          const address = result.address;
+          if (!address.city || !address.state || !address.pinCode || !address.displayName) {
+            throw new IncompleteAddressError();
+          }
+
+          const saved = await onResolved(address);
+          if (saved === false) throw new LocationSaveError();
+          if (currentAttempt === attemptId.current) {
+            setMessage(`Delivery location updated to ${address.displayName}.`);
+          }
         } catch (error) {
-          setMessage(error instanceof Error ? error.message : 'Could not resolve this location. Enter it manually.');
+          if (currentAttempt === attemptId.current) {
+            const friendlyMessage = error instanceof IncompleteAddressError
+              ? 'We could not identify a complete delivery address. Enter your city and PIN code manually.'
+              : error instanceof ApiError && error.code === 'LOCATION_INCOMPLETE_RESULT'
+                ? 'We could not identify a complete delivery address. Enter your city and PIN code manually.'
+              : error instanceof LocationSaveError
+                ? 'This location could not be saved. Enter it manually or try again.'
+                : 'Address lookup is temporarily unavailable. Enter your locality or PIN code manually, or try again.';
+            setMessage(friendlyMessage);
+            setCanRetry(true);
+          }
         } finally {
-          setBusy(false);
+          if (currentAttempt === attemptId.current) setBusy(false);
         }
       },
       (error) => {
+        if (currentAttempt !== attemptId.current) return;
         setBusy(false);
+        setCanRetry(true);
         setMessage(
           error.code === error.PERMISSION_DENIED
             ? 'Location permission was denied. Enter your address manually.'
@@ -54,15 +86,11 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
     );
   }
 
-  function confirmLocation() {
-    if (!detectedAddress) return;
-    onResolved(detectedAddress);
-    setMessage(`Using ${detectedAddress.displayName}. You can still edit the fields below.`);
-  }
-
   return (
     <div className="space-y-2 rounded-xl border border-forest/10 bg-white/60 p-3">
-      <p className="text-xs text-charcoal/55">We use your location once to suggest a delivery city and PIN code. It is not saved until you confirm.</p>
+      <p className="text-xs text-charcoal/55">
+        Allow location access to automatically fill and save your delivery city and PIN code.
+      </p>
       <button
         type="button"
         onClick={detectLocation}
@@ -70,18 +98,8 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
         className="inline-flex items-center gap-2 text-sm font-medium text-agri-green hover:text-forest disabled:opacity-50"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
-        {busy ? 'Detecting location…' : 'Detect my location'}
+        {busy ? 'Updating delivery location…' : canRetry ? 'Try location again' : 'Use my current location'}
       </button>
-      {detectedAddress && (
-        <button
-          type="button"
-          onClick={confirmLocation}
-          className="block w-full rounded-lg bg-agri-emerald/10 px-3 py-2 text-left text-sm text-forest hover:bg-agri-emerald/20"
-        >
-          <span className="font-medium">{detectedAddress.displayName}</span>
-          <span className="mt-1 block text-xs text-charcoal/60">Use this address</span>
-        </button>
-      )}
       {message && <p className="text-xs text-charcoal/60" aria-live="polite">{message}</p>}
     </div>
   );

@@ -65,11 +65,16 @@ describe('AgriConnect xAI advisor', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('uses the documented xAI chat endpoint, server-side bearer key, and current model', async () => {
+  it('uses the documented xAI Responses endpoint, server-side bearer key, and current model', async () => {
     process.env.XAI_API_KEY = 'test-xai-key';
     process.env.XAI_MODEL = 'grok-4.7';
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      choices: [{ message: { content: 'Inspect the plant and consult a local agricultural officer.' } }],
+      status: 'completed',
+      output: [{
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'Inspect the plant and consult a local agricultural officer.' }],
+      }],
     }), { status: 200, headers: { 'Content-Type': 'application/json', 'request-id': 'xai-test-request-1' } }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -81,22 +86,27 @@ describe('AgriConnect xAI advisor', () => {
     expect(response.body.provider).toBe('Grok');
     expect(response.body.response).toContain('Inspect the plant');
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.x.ai/v1/chat/completions',
+      'https://api.x.ai/v1/responses',
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer test-xai-key' }),
         body: expect.stringContaining('"model":"grok-4.7"'),
         signal: expect.any(AbortSignal),
       })
     );
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(requestBody).toMatchObject({ store: false, max_output_tokens: 500 });
+    expect(requestBody.input).toHaveLength(2);
     expect(JSON.stringify(response.body)).not.toContain('test-xai-key');
   });
 
   it.each([
     [401, 'INVALID_CREDENTIALS'],
+    [403, 'INVALID_CREDENTIALS'],
     [404, 'MODEL_OR_ENDPOINT_UNAVAILABLE'],
+    [402, 'QUOTA_OR_BILLING'],
     [429, 'QUOTA_OR_BILLING'],
     [503, 'PROVIDER_UNAVAILABLE'],
-  ])('returns sanitized diagnostics for xAI HTTP %i', async (status, code) => {
+  ])('returns a friendly fallback for xAI HTTP %i', async (status, code) => {
     process.env.XAI_API_KEY = 'test-xai-key';
     const providerError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('provider error', {
@@ -110,9 +120,13 @@ describe('AgriConnect xAI advisor', () => {
 
     expect(response.status).toBe(502);
     expect(response.body.code).toBe(code);
-    expect(response.body.message).toContain(`HTTP ${status}`);
-    expect(response.body.requestId).toBe('provider-request-42');
+    expect(response.body.fallback).toBe(true);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toContain("I'm temporarily unable to answer your agricultural question.");
+    expect(response.body.message).not.toContain(`HTTP ${status}`);
+    expect(response.body.requestId).toBeUndefined();
     expect(providerError).toHaveBeenCalledWith('xAI advisor request failed', {
+      outcome: 'fallback',
       category: code.toLowerCase(),
       status,
       requestId: 'provider-request-42',
@@ -120,7 +134,7 @@ describe('AgriConnect xAI advisor', () => {
     expect(JSON.stringify(response.body)).not.toContain('test-xai-key');
   });
 
-  it('returns a friendly production error and does not expose provider diagnostics', async () => {
+  it('does not expose provider diagnostics in any environment', async () => {
     process.env.NODE_ENV = 'production';
     process.env.XAI_API_KEY = 'test-xai-key';
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -134,9 +148,10 @@ describe('AgriConnect xAI advisor', () => {
       .send({ prompt: 'What should I observe in my crop?', language: 'en' });
 
     expect(response.status).toBe(502);
-    expect(response.body.message).toContain('temporarily unavailable');
+    expect(response.body.message).toContain("I'm temporarily unable to answer your agricultural question.");
     expect(response.body.message).not.toContain('HTTP 401');
-    expect(response.body.requestId).toBe('provider-request-99');
+    expect(response.body.fallback).toBe(true);
+    expect(response.body.requestId).toBeUndefined();
   });
 
   it('rejects malformed provider JSON with a retryable safe error', async () => {
@@ -153,7 +168,29 @@ describe('AgriConnect xAI advisor', () => {
 
     expect(response.status).toBe(502);
     expect(response.body.code).toBe('INVALID_RESPONSE');
-    expect(response.body.requestId).toBe('provider-request-invalid-json');
+    expect(response.body.fallback).toBe(true);
+    expect(response.body.requestId).toBeUndefined();
+  });
+
+  it('treats an empty or unexpected xAI response as a fallback, not an AI answer', async () => {
+    process.env.XAI_API_KEY = 'test-xai-key';
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json({
+      status: 'completed',
+      output: [],
+    })));
+
+    const response = await request(app)
+      .post('/api/ai/advisor')
+      .send({ prompt: 'How do I inspect the crop?', language: 'en' });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({
+      success: false,
+      fallback: true,
+      code: 'INVALID_RESPONSE',
+    });
+    expect(response.body.response).toBeUndefined();
   });
 
   it('reports missing credentials and provider timeouts without logging prompts or keys', async () => {
@@ -166,18 +203,35 @@ describe('AgriConnect xAI advisor', () => {
 
     expect(missing.status).toBe(503);
     expect(missing.body.code).toBe('MISSING_CREDENTIALS');
-    expect(logError).toHaveBeenCalledWith('xAI advisor request failed', { category: 'missing_credentials' });
+    expect(missing.body.fallback).toBe(true);
+    expect(missing.body.message).toContain("I'm temporarily unable to answer your agricultural question.");
+    expect(logError).toHaveBeenCalledWith('xAI advisor request failed', {
+      outcome: 'fallback',
+      category: 'missing_credentials',
+    });
 
     process.env.XAI_API_KEY = 'test-xai-key';
     const timeout = Object.assign(new Error('request timed out'), { name: 'TimeoutError' });
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeout));
+    vi.stubGlobal('fetch', vi.fn()
+      .mockRejectedValueOnce(timeout)
+      .mockRejectedValueOnce(new Error('network unavailable')));
     const timedOut = await request(app)
       .post('/api/ai/advisor')
       .send({ prompt: 'Private crop information', language: 'en' });
 
     expect(timedOut.status).toBe(502);
     expect(timedOut.body.code).toBe('TIMEOUT');
+    expect(timedOut.body.fallback).toBe(true);
+    expect(timedOut.body.message).toContain("I'm temporarily unable to answer your agricultural question.");
     expect(logError.mock.calls.flat().join(' ')).not.toContain('Private crop information');
     expect(logError.mock.calls.flat().join(' ')).not.toContain('test-xai-key');
+
+    const networkFailure = await request(app)
+      .post('/api/ai/advisor')
+      .send({ prompt: 'Private crop information', language: 'en' });
+    expect(networkFailure.status).toBe(502);
+    expect(networkFailure.body.code).toBe('NETWORK_ERROR');
+    expect(networkFailure.body.fallback).toBe(true);
+    expect(logError.mock.calls.flat().join(' ')).not.toContain('Private crop information');
   });
 });

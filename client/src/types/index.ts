@@ -9,6 +9,8 @@ export interface User {
   requestedRole?: Exclude<UserRole, 'admin'>;
   status?: 'active' | 'suspended' | 'pending_verification';
   isVerified?: boolean;
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
   requestedFarm?: {
     farmName: string;
     village: string;

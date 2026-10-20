@@ -2,6 +2,8 @@
 
 The Expo app provides account registration and login, product search, cart management, optional location-based delivery-address suggestions, buyer order history, and native Razorpay checkout.
 
+New accounts must verify both their email link and SMS code before signing in. Open the Resend email link in a browser, then return to the app to enter the SMS code; both verification messages can be resent from the verification screen.
+
 ## Local setup
 
 1. Copy `.env.example` to `.env` and set `EXPO_PUBLIC_API_BASE_URL` to the API origin including `/api`.

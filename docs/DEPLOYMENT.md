@@ -4,7 +4,9 @@
 
 Set `NODE_ENV=production`, `MONGODB_URI`, `JWT_SECRET`, `CLIENT_URL`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in the backend service. The server trusts one Render proxy hop so rate limiting uses the forwarded client IP. `CLIENT_URL` must contain the full frontend origin, without a path or trailing slash (for example, `https://agri-connect-seven-snowy.vercel.app`). Multiple approved origins can be comma-separated. The deployed AgriConnect Vercel origin is also explicitly allowed by the server. Use a matching Razorpay mode pair; production requires `rzp_live_`.
 
-For the agricultural assistant, set `XAI_API_KEY` as a backend-only Render secret. `XAI_MODEL` defaults to `grok-4.7`; the server also accepts the legacy `GROK_API_KEY` variable during migration. Never use a `VITE_` or `EXPO_PUBLIC_` variable for the key. Check `/api/ai/status` after deployment to confirm backend configuration without making a paid inference request. The advisor endpoint is `/api/ai/advisor`; production errors are friendly and retryable, while server logs contain sanitized provider status/category details.
+For the agricultural assistant, set `XAI_API_KEY` as a backend-only Render secret. `XAI_MODEL` defaults to `grok-4.7` (listed in xAI's current model documentation); the server also accepts the legacy `GROK_API_KEY` variable during migration. The integration uses xAI's recommended `POST /v1/responses` endpoint with `max_output_tokens` and `store: false` so prompts and model outputs are not retained by the provider. Never use a `VITE_` or `EXPO_PUBLIC_` variable for the key. Check `/api/ai/status` after deployment to confirm backend configuration without making a paid inference request; this does not validate the key or billing access. The advisor endpoint is `/api/ai/advisor`; provider failures return a friendly retryable fallback rather than provider diagnostics, while server logs contain only sanitized provider status/category details.
+
+Reverse geocoding uses Nominatim by default. Keep `GEOCODING_PROVIDER=nominatim`, set `APP_BASE_URL` to the deployed API base, and optionally set `GEOCODING_CONTACT_EMAIL` so the provider can identify the application. The API validates coordinates, limits concurrent provider calls to a bounded queue, applies a single delayed retry to temporary upstream 5xx responses, respects `Retry-After`, and returns manual-entry guidance when lookup fails. Geocoding failure does not imply that delivery service is available; serviceability remains a separate checkout check.
 
 Registration can immediately create buyer access or submit a farmer, business-buyer, or delivery-partner access request. These requests remain buyer accounts until an administrator approves the requested role in the operations dashboard; admin access cannot be requested through public registration. Farmer approval also requires the administrator to enter farm details.
 
@@ -12,17 +14,19 @@ To enable automated farmer transfers, first have Razorpay activate Route and cre
 
 For order-confirmation email, set `RESEND_API_KEY` and a verified `RESEND_FROM_EMAIL`. If absent, checkout still succeeds and email remains queued; configure the variables to start the outbox worker.
 
+New registrations require both email and phone verification before sign-in. Configure `RESEND_API_KEY`, a verified `RESEND_FROM_EMAIL`, `MSG91_AUTH_KEY`, and `MSG91_OTP_TEMPLATE_ID` on the backend. `MSG91_DEFAULT_COUNTRY_CODE` defaults to `91` for ten-digit Indian phone numbers; numbers beginning with `+` are sent with that explicit country code. Keep all provider credentials server-side. Email verification links expire after 30 minutes; MSG91 validates the SMS OTP. The registration flow reports verification instructions and allows resending messages.
+
 For farmer product photos, create a Cloudinary account and set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` as backend-only Render environment variables. Never put the API secret in a Vite or Expo variable. Uploads are signed by the API, limited to JPEG/PNG/WebP images up to 5 MB, and attached to farmer-owned listings. Removing a listing archives it; order item snapshots remain intact.
 
 After deployment, check `/api/health`. It must report `Configured (Live Mode)` before accepting real payments. Configure the Razorpay webhook URL as `/api/payment/webhook` using the same mode as the API. Also verify the Render service is awake and returns `/api/health`; a sleeping or unavailable service can cause browser CORS errors even when its origin allowlist is correct.
 
-For the first operations administrator, register a normal customer account, then run the one-time CLI with `ADMIN_BOOTSTRAP_EMAIL` set to that account email and the production `MONGODB_URI`/`JWT_SECRET` available to the command environment:
+To provision the designated operations administrator, register a normal account for `akashkoravena@gmail.com`, complete both email and phone verification, then run the one-time CLI with the production `MONGODB_URI`/`JWT_SECRET` available to the operator's command environment:
 
 ```bash
-ADMIN_BOOTSTRAP_EMAIL=operator@example.com npm --prefix server run bootstrap:admin
+ADMIN_BOOTSTRAP_EMAIL=akashkoravena@gmail.com npm --prefix server run bootstrap:admin
 ```
 
-This promotes an existing account, writes an audit entry, refuses seeded demo accounts, and does not create or delete account data.
+This operator-only command promotes that existing verified account, writes an audit entry, refuses seeded demo accounts, and does not create or delete account data. The application never grants administrator access based on a submitted email address.
 
 ## Frontend on Vercel
 

@@ -17,7 +17,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import RazorpayCheckout from 'react-native-razorpay';
-import { apiRequest, getApiError, type Product, type Session } from './src/api';
+import { ApiError, apiRequest, getApiError, type Product, type Session } from './src/api';
 
 const SESSION_KEY = 'agriconnect_session';
 const green = '#246B45';
@@ -56,6 +56,10 @@ export default function App() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [registering, setRegistering] = useState(false);
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [contactsVerified, setContactsVerified] = useState(false);
+  const [verificationMessage, setVerificationMessage] = useState('');
   const [address, setAddress] = useState<Address>({
     recipientName: '',
     phone: '',
@@ -114,19 +118,87 @@ export default function App() {
     if (session && screen === 'orders') void loadOrders();
   }, [session, screen]);
 
+  async function persistSession(result: Session) {
+    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(result));
+    setSession(result);
+    setAddress((current) => ({ ...current, recipientName: result.user.name, phone: result.user.phone || phone }));
+  }
+
   async function authenticate() {
     setBusy(true);
     setError('');
     try {
-      const result = await apiRequest<Session>(registering ? '/auth/register' : '/auth/login', {
-        method: 'POST',
-        body: JSON.stringify(registering ? { name, email, password, phone } : { email, password }),
-      });
-      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(result));
-      setSession(result);
-      setAddress((current) => ({ ...current, recipientName: result.user.name, phone }));
+      if (registering) {
+        const result = await apiRequest<{
+          user: { email: string };
+          verification: { emailSent: boolean; phoneCodeSent: boolean };
+        }>('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({ name, email, password, phone, role: 'buyer' }),
+        });
+        setEmail(result.user.email);
+        setRegistering(false);
+        setVerificationPending(true);
+        setVerificationMessage(
+          result.verification.emailSent && result.verification.phoneCodeSent
+            ? 'Account created. Open the email verification link, then enter the SMS code below.'
+            : 'Account created. One or more messages could not be sent; use the resend options below.'
+        );
+      } else {
+        const result = await apiRequest<Session>('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password }),
+        });
+        await persistSession(result);
+      }
     } catch (authError) {
+      if (authError instanceof ApiError && authError.code === 'CONTACT_VERIFICATION_REQUIRED') {
+        setVerificationPending(true);
+      }
       setError(getApiError(authError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendVerificationMessage(channel: 'email' | 'phone') {
+    setBusy(true);
+    setError('');
+    setVerificationMessage('');
+    try {
+      const result = await apiRequest<{ message: string }>(`/auth/verification/${channel}/resend`, {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+      setVerificationMessage(result.message);
+    } catch (verificationError) {
+      setError(getApiError(verificationError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyPhone() {
+    setBusy(true);
+    setError('');
+    setVerificationMessage('');
+    try {
+      const result = await apiRequest<{
+        emailVerified: boolean;
+        phoneVerified: boolean;
+        message: string;
+      }>('/auth/verification/phone/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ email, code: verificationCode }),
+      });
+      setContactsVerified(result.emailVerified && result.phoneVerified);
+      setVerificationMessage(
+        result.emailVerified && result.phoneVerified
+          ? 'Your email and phone are verified. Continue to sign in.'
+          : result.message
+      );
+    } catch (verificationError) {
+      setError(getApiError(verificationError));
     } finally {
       setBusy(false);
     }
@@ -224,19 +296,80 @@ export default function App() {
         <StatusBar barStyle="dark-content" />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.auth}>
           <Text style={styles.brand}>AgriConnect</Text>
-          <Text style={styles.heading}>{registering ? 'Create your account' : 'Welcome back'}</Text>
-          <Text style={styles.muted}>Fresh produce, directly from verified farms.</Text>
-          {registering && <TextInput accessibilityLabel="Full name" placeholder="Full name" style={styles.input} value={name} onChangeText={setName} />}
-          <TextInput accessibilityLabel="Email" placeholder="Email" autoCapitalize="none" keyboardType="email-address" style={styles.input} value={email} onChangeText={setEmail} />
-          {registering && <TextInput accessibilityLabel="Phone" placeholder="Phone number" keyboardType="phone-pad" style={styles.input} value={phone} onChangeText={setPhone} />}
-          <TextInput accessibilityLabel="Password" placeholder="Password" secureTextEntry style={styles.input} value={password} onChangeText={setPassword} />
-          {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-          <Pressable style={styles.primaryButton} onPress={() => void authenticate()} disabled={busy}>
-            {busy ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>{registering ? 'Create account' : 'Sign in'}</Text>}
-          </Pressable>
-          <Pressable onPress={() => setRegistering((value) => !value)} style={styles.linkButton}>
-            <Text style={styles.linkText}>{registering ? 'Already registered? Sign in' : 'New to AgriConnect? Create account'}</Text>
-          </Pressable>
+          {verificationPending ? (
+            <>
+              <Text style={styles.heading}>Verify your account</Text>
+              <Text style={styles.muted}>
+                Open the verification link sent to your email, then enter the SMS code. Both contacts must be verified before you can sign in.
+              </Text>
+              <TextInput
+                accessibilityLabel="Account email"
+                placeholder="Email"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+              />
+              <TextInput
+                accessibilityLabel="SMS verification code"
+                placeholder="6-digit SMS code"
+                keyboardType="number-pad"
+                maxLength={6}
+                style={styles.input}
+                value={verificationCode}
+                onChangeText={setVerificationCode}
+              />
+              {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+              {verificationMessage ? <Text accessibilityRole="alert" style={styles.notice}>{verificationMessage}</Text> : null}
+              {!contactsVerified ? (
+                <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void verifyPhone()} disabled={busy}>
+                  {busy ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>Verify phone</Text>}
+                </Pressable>
+              ) : null}
+              <View style={styles.verificationActions}>
+                <Pressable style={styles.secondaryButton} onPress={() => void sendVerificationMessage('email')} disabled={busy}>
+                  <Text style={styles.secondaryText}>Resend verification email</Text>
+                </Pressable>
+                <Pressable style={styles.secondaryButton} onPress={() => void sendVerificationMessage('phone')} disabled={busy}>
+                  <Text style={styles.secondaryText}>Resend SMS code</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                onPress={() => {
+                  setVerificationPending(false);
+                  setContactsVerified(false);
+                  setVerificationCode('');
+                  setVerificationMessage('');
+                  setError('');
+                }}
+                style={styles.linkButton}
+              >
+                <Text style={styles.linkText}>{contactsVerified ? 'Continue to sign in' : 'Back to sign in'}</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={styles.heading}>{registering ? 'Create your account' : 'Welcome back'}</Text>
+              <Text style={styles.muted}>Fresh produce, directly from verified farms.</Text>
+              {registering && <TextInput accessibilityLabel="Full name" placeholder="Full name" style={styles.input} value={name} onChangeText={setName} />}
+              <TextInput accessibilityLabel="Email" placeholder="Email" autoCapitalize="none" keyboardType="email-address" style={styles.input} value={email} onChangeText={setEmail} />
+              {registering && <TextInput accessibilityLabel="Phone" placeholder="Phone number" keyboardType="phone-pad" style={styles.input} value={phone} onChangeText={setPhone} />}
+              <TextInput accessibilityLabel="Password" placeholder="Password" secureTextEntry style={styles.input} value={password} onChangeText={setPassword} />
+              {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+              <Pressable style={styles.primaryButton} onPress={() => void authenticate()} disabled={busy}>
+                {busy ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>{registering ? 'Create account' : 'Sign in'}</Text>}
+              </Pressable>
+              {!registering ? (
+                <Pressable onPress={() => { setVerificationPending(true); setError(''); }} style={styles.linkButton}>
+                  <Text style={styles.linkText}>Verify email and phone</Text>
+                </Pressable>
+              ) : null}
+              <Pressable onPress={() => setRegistering((value) => !value)} style={styles.linkButton}>
+                <Text style={styles.linkText}>{registering ? 'Already registered? Sign in' : 'New to AgriConnect? Create account'}</Text>
+              </Pressable>
+            </>
+          )}
         </KeyboardAvoidingView>
       </SafeAreaView>
     );
@@ -431,6 +564,8 @@ const styles = StyleSheet.create({
   secondaryText: { color: green, fontSize: 15, fontWeight: '600', textAlign: 'center' },
   linkButton: { padding: 10, alignItems: 'center' },
   linkText: { color: green, fontWeight: '600' },
+  notice: { color: '#246B45', lineHeight: 20 },
+  verificationActions: { gap: 10 },
   cartButton: { borderRadius: 20, backgroundColor: green, paddingHorizontal: 16, paddingVertical: 10 },
   cartButtonText: { color: 'white', fontWeight: '700' },
   tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#D8E0D9' },

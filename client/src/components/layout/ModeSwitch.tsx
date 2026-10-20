@@ -4,18 +4,26 @@ import { Moon, Sun } from 'lucide-react';
 const STORAGE_KEY = 'agriconnect-color-mode';
 
 export function ModeSwitch({ compact = false }: { compact?: boolean }) {
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY) === 'dark';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
-    const isDark = localStorage.getItem(STORAGE_KEY) === 'dark';
-    setDark(isDark);
-    document.documentElement.classList.toggle('dark-mode', isDark);
-  }, []);
+    document.documentElement.classList.toggle('dark-mode', dark);
+  }, [dark]);
 
   function toggleMode() {
     const next = !dark;
     setDark(next);
-    localStorage.setItem(STORAGE_KEY, next ? 'dark' : 'light');
+    try {
+      localStorage.setItem(STORAGE_KEY, next ? 'dark' : 'light');
+    } catch (error) {
+      console.warn('Color mode preference could not be saved.', error);
+    }
     document.documentElement.classList.toggle('dark-mode', next);
   }
 

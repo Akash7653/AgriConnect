@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import crypto from 'crypto';
 import { app } from '../index.js';
@@ -8,18 +8,68 @@ import { Order, buildSellerFulfilments } from '../models/Order.js';
 import { Refund } from '../models/Refund.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
 import { User } from '../models/User.js';
+import { FarmerProfile } from '../models/FarmerProfile.js';
 import { seedDatabase } from '../scripts/seed.js';
 import { expirePendingOrders } from '../jobs/expirePendingOrders.js';
+import { processAutomaticPayouts } from '../services/automaticPayouts.js';
+
+const {
+  createRazorpayOrderMock,
+  findRazorpayRouteTransferMock,
+  createRazorpayRouteTransferMock,
+  fetchRazorpayRouteTransferMock,
+} = vi.hoisted(() => {
+  let nextOrderId = 0;
+  return {
+    createRazorpayOrderMock: vi.fn(async (options: { amountPaise: number; currency?: string }) => ({
+      id: `order_test_${++nextOrderId}`,
+      amount: options.amountPaise,
+      currency: options.currency ?? 'INR',
+    })),
+    findRazorpayRouteTransferMock: vi.fn(async (_options: { paymentId: string; ledgerId: string }): Promise<{ id: string; status: string } | null> => null),
+    createRazorpayRouteTransferMock: vi.fn(async (_options: {
+      paymentId: string;
+      accountId: string;
+      amountPaise: number;
+      ledgerId: string;
+    }): Promise<{ id: string; status: string }> => ({ id: 'trf_test_auto', status: 'processed' })),
+    fetchRazorpayRouteTransferMock: vi.fn(async (_transferId: string): Promise<{ id: string; status: string }> => ({
+      id: 'trf_test_auto',
+      status: 'processed',
+    })),
+  };
+});
+
+vi.mock('../services/razorpay.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/razorpay.js')>();
+  return {
+    ...actual,
+    createRazorpayOrder: createRazorpayOrderMock,
+    findRazorpayRouteTransfer: findRazorpayRouteTransferMock,
+    createRazorpayRouteTransfer: createRazorpayRouteTransferMock,
+    fetchRazorpayRouteTransfer: fetchRazorpayRouteTransferMock,
+  };
+});
 
 const testSeedPassword = crypto.randomBytes(32).toString('base64url');
+const originalRazorpayKeySecret = process.env.RAZORPAY_KEY_SECRET;
+const originalWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+const originalRouteEnabled = process.env.RAZORPAY_ROUTE_ENABLED;
 
 beforeAll(async () => {
   process.env.SEED_PASSWORD = testSeedPassword;
+  process.env.RAZORPAY_KEY_SECRET = 'unit-test-razorpay-secret';
   await connectDB();
   await seedDatabase();
 }, 30000);
 
 afterAll(async () => {
+  if (originalRazorpayKeySecret === undefined) delete process.env.RAZORPAY_KEY_SECRET;
+  else process.env.RAZORPAY_KEY_SECRET = originalRazorpayKeySecret;
+  if (originalWebhookSecret === undefined) delete process.env.RAZORPAY_WEBHOOK_SECRET;
+  else process.env.RAZORPAY_WEBHOOK_SECRET = originalWebhookSecret;
+  if (originalRouteEnabled === undefined) delete process.env.RAZORPAY_ROUTE_ENABLED;
+  else process.env.RAZORPAY_ROUTE_ENABLED = originalRouteEnabled;
   await disconnectDB();
 });
 
@@ -27,6 +77,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
   let buyerToken = '';
   let listingId = '';
   let createdOrderId = '';
+  let capturedOrderId = '';
   let rzpOrderId = '';
   let amountPaise = 0;
 
@@ -184,6 +235,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
 
     expect(createRes.status).toBe(201);
     const validOrderId = createRes.body.orderId;
+    capturedOrderId = validOrderId;
     const validRzpOrderId = createRes.body.razorpayOrderId;
     const validPaymentId = `pay_test_${Date.now()}`;
 
@@ -223,6 +275,51 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
 
     expect(duplicateRes.status).toBe(200);
     expect(duplicateRes.body.message).toContain('idempotent');
+  });
+
+  it('4a. Automatically settles eligible delivered farmer payouts idempotently', async () => {
+    const order = await Order.findById(capturedOrderId);
+    expect(order?.payment.status).toBe('captured');
+    const farmerId = order!.items[0].farmerId;
+    const profile = await FarmerProfile.findOne({ userId: farmerId });
+    expect(profile).toBeDefined();
+    await FarmerProfile.updateOne({ _id: profile!._id }, { $set: { razorpayAccountId: 'acc_test_farmer' } });
+    const ledger = await PayoutLedger.findOne({ orderId: order!._id, farmerId, entryType: 'sale' });
+    expect(ledger).toBeDefined();
+
+    await Order.updateOne({ _id: order!._id }, { $set: { status: 'delivered' } });
+    await PayoutLedger.updateOne(
+      { _id: ledger!._id },
+      {
+        $set: { settlementStatus: 'accrued', automaticPayoutEligibleAt: new Date() },
+        $unset: { automaticPayoutLeaseUntil: 1 },
+      }
+    );
+    process.env.RAZORPAY_ROUTE_ENABLED = 'true';
+    findRazorpayRouteTransferMock.mockResolvedValue(null);
+    createRazorpayRouteTransferMock.mockResolvedValue({ id: 'trf_test_auto', status: 'processed' });
+    fetchRazorpayRouteTransferMock.mockClear();
+    createRazorpayRouteTransferMock.mockClear();
+
+    try {
+      expect(await processAutomaticPayouts()).toBe(1);
+      const settled = await PayoutLedger.findById(ledger!._id);
+      expect(settled?.settlementStatus).toBe('settled');
+      expect(settled?.razorpayTransferId).toBe('trf_test_auto');
+      expect(settled?.transactionReference).toBe('trf_test_auto');
+      expect(createRazorpayRouteTransferMock).toHaveBeenCalledWith({
+        paymentId: order!.payment.transactionId,
+        accountId: 'acc_test_farmer',
+        amountPaise: ledger!.farmerPayoutPaise,
+        ledgerId: ledger!._id.toString(),
+      });
+      expect(await processAutomaticPayouts()).toBe(0);
+      expect(createRazorpayRouteTransferMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await Order.updateOne({ _id: order!._id }, { $set: { status: 'confirmed' } });
+      if (originalRouteEnabled === undefined) delete process.env.RAZORPAY_ROUTE_ENABLED;
+      else process.env.RAZORPAY_ROUTE_ENABLED = originalRouteEnabled;
+    }
   });
 
   it('5. Webhook should reject missing or invalid signature when secret is configured', async () => {

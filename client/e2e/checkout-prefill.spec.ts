@@ -54,6 +54,11 @@ test('location fills checkout delivery fields and offers cash on delivery', asyn
         },
       }),
     }));
+    await context.route(`${apiOrigin}/api/auth/profile`, (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    }));
     await context.route(`${apiOrigin}/api/serviceability**`, (route) => route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -70,8 +75,8 @@ test('location fills checkout delivery fields and offers cash on delivery', asyn
     await page.getByRole('button', { name: 'Add Fresh Tomatoes to cart' }).click();
     await page.getByRole('button', { name: /^Cart/ }).first().click();
     await page.getByRole('button', { name: 'Continue to payment' }).click();
-    await page.getByRole('button', { name: 'Detect my location' }).click();
-    await page.getByRole('button', { name: /Use this address/ }).click();
+    await page.getByRole('button', { name: 'Use my current location' }).click();
+    await expect(page.getByText(/Delivery location updated to Farm Road/)).toBeVisible();
 
     await expect(page.getByLabel('Full name')).toHaveValue('Checkout Buyer');
     await expect(page.getByLabel('Phone')).toHaveValue('9123456789');

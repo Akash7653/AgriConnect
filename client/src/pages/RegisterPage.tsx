@@ -70,14 +70,16 @@ export function RegisterPage() {
     }
     setLoading(true);
     try {
-      await signUp({ fullName, email, password, phone, role, ...(role === 'farmer' ? { farm } : {}) });
+      const result = await signUp({ fullName, email, password, phone, role, ...(role === 'farmer' ? { farm } : {}) });
       showToast(
-        role === 'buyer'
-          ? 'Your buyer account was created successfully.'
-          : `Your ${registrationRoleLabel(role)} registration was received. Access is pending admin approval.`,
-        'success'
+        result.verification.emailSent && result.verification.phoneCodeSent
+          ? 'Account created. Verify your email and phone to sign in.'
+          : 'Account created. Use the verification page to resend any missing messages.',
+        result.verification.emailSent && result.verification.phoneCodeSent ? 'success' : 'error'
       );
-      navigate('/dashboard');
+      navigate('/verify-account', {
+        state: { email: email.trim().toLowerCase(), verification: result.verification },
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed.';
       setError(message);
@@ -117,8 +119,8 @@ export function RegisterPage() {
         </label>
         <p className="rounded-lg bg-forest/5 p-3 text-sm text-charcoal/65">
           {role === 'buyer'
-            ? 'Buyer access is available after registration.'
-            : `You can use buyer features immediately. ${registrationRoleLabel(role)} features become available after an administrator reviews and approves your request.`}
+            ? 'Verify your email address and phone number to activate sign-in.'
+            : `Verify your email and phone before signing in. ${registrationRoleLabel(role)} access also requires administrator approval.`}
         </p>
         {role === 'farmer' && (
           <fieldset className="grid gap-3 rounded-xl border border-forest/10 p-4 sm:grid-cols-2">

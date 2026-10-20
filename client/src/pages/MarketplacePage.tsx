@@ -415,6 +415,7 @@ function CartDrawer({
   onPay,
   onBackToCart,
 }: CartDrawerProps) {
+  const { updateAddress: persistProfileAddress } = useAuth();
   const [address, setAddress] = useState<DeliveryAddress>(() => ({
     recipientName: profile?.fullName ?? '',
     phone: profile?.phone ?? '',
@@ -428,6 +429,7 @@ function CartDrawer({
   const profileId = useRef(profile?.id);
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('razorpay');
   const [deliveryEstimate, setDeliveryEstimate] = useState('');
+  const [locationSaveError, setLocationSaveError] = useState('');
 
   useEffect(() => {
     if (profileId.current === profile?.id) return;
@@ -551,25 +553,45 @@ function CartDrawer({
                   <p className="text-sm text-charcoal/60 mt-1">Your details are sent securely with the order.</p>
                 </div>
                 <LocationSelector
-                  onResolved={(resolved) =>
-                    setAddress((current) => {
+                  onResolved={async (resolved) => {
+                    if (!profile) {
+                      setLocationSaveError('Sign in to save a delivery location.');
+                      return false;
+                    }
+                    try {
+                      await persistProfileAddress({
+                        ...profile.address,
+                        street: resolved.displayName,
+                        villageOrCity: resolved.city,
+                        district: resolved.district,
+                        state: resolved.state,
+                        pinCode: resolved.pinCode,
+                      });
                       const suggestion: DeliveryAddress = {
-                        recipientName: profile?.fullName ?? '',
-                        phone: profile?.phone ?? '',
+                        recipientName: profile.fullName ?? '',
+                        phone: profile.phone ?? '',
                         addressLine1: resolved.displayName,
                         city: resolved.city,
                         district: resolved.district,
                         state: resolved.state,
                         pinCode: resolved.pinCode,
                       };
-                      const next = { ...current };
-                      for (const [field, value] of Object.entries(suggestion) as [keyof DeliveryAddress, string][]) {
-                        if (value && !editedFields.current.has(field)) next[field] = value;
-                      }
-                      return next;
-                    })
-                  }
+                      setAddress((current) => {
+                        const next = { ...current };
+                        for (const [field, value] of Object.entries(suggestion) as [keyof DeliveryAddress, string][]) {
+                          if (value && !editedFields.current.has(field)) next[field] = value;
+                        }
+                        return next;
+                      });
+                      setLocationSaveError('');
+                      return true;
+                    } catch (error) {
+                      setLocationSaveError(error instanceof Error ? error.message : 'Could not save this delivery location.');
+                      return false;
+                    }
+                  }}
                 />
+                {locationSaveError && <p role="alert" className="text-xs text-red-700">{locationSaveError}</p>}
                 {deliveryEstimate && <p role="status" className="rounded-lg bg-agri-emerald/10 px-3 py-2 text-xs text-forest">{deliveryEstimate}</p>}
                 <div className="grid grid-cols-2 gap-3">
                   {([

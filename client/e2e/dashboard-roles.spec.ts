@@ -45,7 +45,7 @@ test('farmer listing page uses saved farm location and does not expose the buyer
   }
 });
 
-test('buyer has category and search tabs in the mobile bar without farmer-specific navigation', async ({ browser }) => {
+test('buyer has the four-item shopping bar, account menu, and mobile theme toggle', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
   try {
     await addSession(context, 'buyer');
@@ -58,11 +58,16 @@ test('buyer has category and search tabs in the mobile bar without farmer-specif
     const page = await context.newPage();
     await page.goto('/dashboard/marketplace');
     const mobileNav = page.locator('nav.fixed.bottom-0');
+    await expect(mobileNav.getByRole('link', { name: 'Home' })).toHaveCount(1);
     await expect(mobileNav.getByRole('link', { name: 'Categories' })).toHaveCount(1);
-    await expect(mobileNav.getByRole('link', { name: 'Search' })).toHaveCount(1);
     await expect(mobileNav.getByRole('link', { name: 'Orders' })).toHaveCount(1);
+    await expect(mobileNav.getByRole('link', { name: /^Cart, 0 items$/ })).toHaveCount(1);
+    await expect(mobileNav.getByRole('link', { name: 'Search' })).toHaveCount(0);
     await expect(mobileNav.getByRole('link', { name: 'Marketplace' })).toHaveCount(0);
     await expect(mobileNav.getByRole('link', { name: 'Crop Listings' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open account' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Switch to dark mode' })).toBeVisible();
+    await expect(page.getByText(/live account/i)).toHaveCount(0);
   } finally {
     await context.close();
   }
@@ -87,15 +92,8 @@ test('all registration roles persist the selected role and explain approval requ
           status: 201,
           contentType: 'application/json',
           body: JSON.stringify({
-            token: `registration-test-${role}-token`,
-            user: {
-              id: `${role}-applicant`,
-              email: `${role}@example.test`,
-              name: `${role} Applicant`,
-              role: 'buyer',
-              ...(role === 'buyer' ? {} : { requestedRole: role }),
-              status: role === 'buyer' ? 'active' : 'pending_verification',
-            },
+            success: true,
+            verification: { emailSent: true, phoneCodeSent: true },
           }),
         });
       });
@@ -116,28 +114,52 @@ test('all registration roles persist the selected role and explain approval requ
       await page.getByLabel('Password', { exact: true }).fill('LongPassword123!');
       await page.getByLabel('Confirm password').fill('LongPassword123!');
       await page.getByRole('button', { name: 'Create account' }).click();
-      await expect(page).toHaveURL(/\/dashboard$/);
+      await expect(page).toHaveURL(/\/verify-account$/);
       expect(submittedRole).toBe(role);
       if (role === 'farmer') expect(submittedFarmName).toBe('Applicant Farm');
-      await expect.poll(() => page.evaluate(() => {
-        const session = JSON.parse(localStorage.getItem('agriconnect_session') ?? '{}');
-        return [session.user.role, session.user.requestedRole ?? null, session.user.status];
-      })).toEqual([
-        'buyer',
-        role === 'buyer' ? null : role,
-        role === 'buyer' ? 'active' : 'pending_verification',
-      ]);
-      if (role === 'buyer') {
-        await expect(page.getByRole('heading', { name: /pending review/i })).toHaveCount(0);
-      } else {
-        const labels = { farmer: 'Farmer / Seller', business: 'Business buyer', logistics: 'Delivery partner' };
-        await expect(page.getByRole('heading', { name: `Your ${labels[role]} access is pending review.` })).toBeVisible();
-        await expect(page.getByText(/this account has Buyer access only/i)).toBeVisible();
-        await expect(page.getByRole('link', { name: /Continue with Buyer access/ })).toBeVisible();
-      }
+      await expect(page.getByLabel('Account email')).toHaveValue(`${role}@example.test`);
+      await expect(page.getByText('Email address', { exact: true })).toBeVisible();
+      await expect(page.getByText('Phone number', { exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Resend verification email' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Resend SMS code' })).toBeVisible();
+      expect(await page.evaluate(() => localStorage.getItem('agriconnect_session'))).toBeNull();
     } finally {
       await context.close();
     }
+  }
+});
+
+test('verification link and SMS code must both succeed before the account is complete', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    await context.route(`${apiOrigin}/api/auth/verification/email/confirm`, async (route) => {
+      expect(route.request().postDataJSON()).toEqual({ token: 'email-verification-token-12345678901234567890' });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, email: 'buyer@example.test', emailVerified: true, phoneVerified: false }),
+      });
+    });
+    await context.route(`${apiOrigin}/api/auth/verification/phone/confirm`, async (route) => {
+      expect(route.request().postDataJSON()).toEqual({ email: 'buyer@example.test', code: '123456' });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, emailVerified: true, phoneVerified: true }),
+      });
+    });
+    await context.route('**/socket.io/**', (route) => route.abort());
+
+    const page = await context.newPage();
+    await page.goto('/verify-account#token=email-verification-token-12345678901234567890');
+    await expect(page.getByText('Your email address is verified.')).toBeVisible();
+    await page.getByLabel('Account email').fill('buyer@example.test');
+    await page.getByLabel('SMS verification code').fill('123456');
+    await page.getByRole('button', { name: 'Verify phone' }).click();
+    await expect(page.getByRole('heading', { name: 'Account verified.' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Continue to sign in' })).toBeVisible();
+  } finally {
+    await context.close();
   }
 });
 

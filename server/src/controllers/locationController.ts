@@ -24,6 +24,7 @@ const coordinatesSchema = z.object({
 });
 
 export async function reverseGeocodeLocation(req: Request, res: Response): Promise<void> {
+  const startedAt = Date.now();
   const coordinates = coordinatesSchema.safeParse(req.body);
   if (!coordinates.success) {
     res.status(400).json({
@@ -47,14 +48,24 @@ export async function reverseGeocodeLocation(req: Request, res: Response): Promi
     res.json({ success: true, address });
   } catch (error) {
     if (error instanceof GeocodingError) {
-      console.warn(`[location] Reverse-geocoding failed (${error.statusCode})`);
-      res.status(error.statusCode).json({ success: false, message: error.message });
+      if (error.retryAfterSeconds !== undefined) {
+        res.setHeader('Retry-After', String(error.retryAfterSeconds));
+      }
+      res.status(error.statusCode).json({
+        success: false,
+        code: `LOCATION_${error.category.toUpperCase()}`,
+        message: error.message,
+      });
       return;
     }
 
-    console.error('[location] Reverse-geocoding request failed');
+    console.error('[location] Reverse-geocoding request failed', {
+      category: 'internal_error',
+      durationMs: Date.now() - startedAt,
+    });
     res.status(502).json({
       success: false,
+      code: 'LOCATION_LOOKUP_FAILED',
       message: 'Location lookup is temporarily unavailable. Enter your address manually.',
     });
   }

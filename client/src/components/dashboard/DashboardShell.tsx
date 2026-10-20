@@ -1,7 +1,10 @@
 import { useState, type ReactNode } from 'react';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Logo } from '@/components/Logo';
+import { AccountMenu } from '@/components/layout/AccountMenu';
+import { BuyerMobileNavigation } from '@/components/layout/BuyerMobileNavigation';
+import { ModeSwitch } from '@/components/layout/ModeSwitch';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
 import { classNames } from '@/utils';
@@ -18,10 +21,6 @@ import {
   ClipboardList,
   LogOut,
   MoreHorizontal,
-  Home,
-  LayoutGrid,
-  Search,
-  UserRound,
 } from 'lucide-react';
 import type { UserRole } from '@/types';
 
@@ -76,7 +75,6 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
   const { signOut } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const nav = navByRole[role];
   const isBuyer = role === 'buyer' || role === 'business';
@@ -145,7 +143,10 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
               {subtitle && <p className="text-sm text-charcoal/55 hidden sm:block">{subtitle}</p>}
             </div>
           </div>
-          <span className="text-xs text-charcoal/45">Live account</span>
+          <div className="flex items-center gap-3">
+            <ModeSwitch compact />
+            <AccountMenu />
+          </div>
         </header>
 
         <main className="p-5 pb-24 sm:p-8 sm:pb-24 lg:pb-8">
@@ -158,109 +159,76 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
           </motion.div>
         </main>
 
-        <nav aria-label="Buyer navigation" className="fixed bottom-0 left-0 right-0 z-30 border-t border-forest/10 bg-ivory/95 px-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(22,35,28,0.08)] backdrop-blur-xl lg:hidden">
-          {mobileMenuOpen && (
-            <div className="absolute bottom-[calc(100%+0.5rem)] left-3 right-3 rounded-2xl border border-forest/15 bg-ivory p-2 shadow-cinematic">
-              <div className="grid grid-cols-2 gap-1">
-                {overflowMobileNav.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.to === '/dashboard'}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={({ isActive }) =>
-                      classNames(
-                        'flex items-center gap-2 rounded-xl px-3 py-3 text-sm transition-colors',
-                        isActive ? 'bg-forest text-ivory' : 'text-forest hover:bg-forest/5'
-                      )
-                    }
+        {isBuyer ? (
+          <BuyerMobileNavigation />
+        ) : (
+          <nav aria-label={`${role} dashboard navigation`} className="fixed bottom-0 left-0 right-0 z-30 border-t border-forest/10 bg-ivory/95 px-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(22,35,28,0.08)] backdrop-blur-xl lg:hidden">
+            {mobileMenuOpen && (
+              <div className="absolute bottom-[calc(100%+0.5rem)] left-3 right-3 rounded-2xl border border-forest/15 bg-ivory p-2 shadow-cinematic">
+                <div className="grid grid-cols-2 gap-1">
+                  {overflowMobileNav.map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.to === '/dashboard'}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }) =>
+                        classNames(
+                          'flex items-center gap-2 rounded-xl px-3 py-3 text-sm transition-colors',
+                          isActive ? 'bg-forest text-ivory' : 'text-forest hover:bg-forest/5'
+                        )
+                      }
+                    >
+                      <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.7} />
+                      <span>{item.label}</span>
+                    </NavLink>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="flex items-center gap-2 rounded-xl px-3 py-3 text-left text-sm text-red-600 transition-colors hover:bg-red-50"
                   >
-                    <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.7} />
-                    <span>{item.label}</span>
-                  </NavLink>
-                ))}
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="flex items-center gap-2 rounded-xl px-3 py-3 text-left text-sm text-red-600 transition-colors hover:bg-red-50"
-                >
-                  <LogOut className="h-4 w-4 shrink-0" strokeWidth={1.7} />
-                  <span>Sign out</span>
-                </button>
+                    <LogOut className="h-4 w-4 shrink-0" strokeWidth={1.7} />
+                    <span>Sign out</span>
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-          {isBuyer ? (
-            <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
-              <BuyerMobileLink to="/" label="Home" active={location.pathname === '/'}><Home className="h-5 w-5" /></BuyerMobileLink>
-              <BuyerMobileLink to="/dashboard/marketplace#categories" label="Categories" active={location.pathname.endsWith('/marketplace') && location.hash === '#categories'}><LayoutGrid className="h-5 w-5" /></BuyerMobileLink>
-              <BuyerMobileLink to="/dashboard/marketplace#product-search" label="Search" active={location.pathname.endsWith('/marketplace') && location.hash === '#product-search'}><Search className="h-5 w-5" /></BuyerMobileLink>
-              <BuyerMobileLink to="/dashboard/orders" label="Orders" active={location.pathname.endsWith('/orders')}><ShoppingBag className="h-5 w-5" /></BuyerMobileLink>
+            )}
+            <div className="mx-3 mb-1 grid max-w-2xl grid-cols-4 gap-1 rounded-2xl border border-forest/15 bg-ivory p-1 sm:mx-auto">
+              {visibleMobileNav.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === '/dashboard'}
+                  className={({ isActive }) =>
+                    classNames(
+                      'flex min-w-0 w-full flex-col items-center gap-1 rounded-xl px-1 py-2 text-center text-[10px] font-medium uppercase leading-tight tracking-wide transition-colors',
+                      isActive ? 'm-0.5 bg-forest text-ivory' : 'text-charcoal/55 hover:bg-forest/5 hover:text-forest'
+                    )
+                  }
+                >
+                  <item.icon className="h-4 w-4" strokeWidth={1.7} />
+                  <span className="flex min-h-[24px] items-center justify-center">{item.label}</span>
+                </NavLink>
+              ))}
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen((isOpen) => !isOpen)}
                 aria-expanded={mobileMenuOpen}
-                className={classNames('flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agri-green', mobileMenuOpen ? 'font-semibold text-agri-green' : 'text-charcoal/60 hover:bg-forest/5')}
+                aria-label="More dashboard navigation"
+                className={classNames(
+                  'flex min-w-0 w-full flex-col items-center gap-1 rounded-xl px-1 py-2 text-center text-[10px] font-medium uppercase leading-tight tracking-wide transition-colors',
+                  mobileMenuOpen ? 'bg-forest text-ivory' : 'text-charcoal/55 hover:bg-forest/5 hover:text-forest'
+                )}
               >
-                <UserRound className="h-5 w-5" /><span>Account</span>
+                <MoreHorizontal className="h-4 w-4" strokeWidth={1.7} />
+                <span className="flex min-h-[24px] items-center justify-center">More</span>
               </button>
             </div>
-          ) : (
-          <div className="mx-3 mb-1 grid max-w-2xl grid-cols-4 gap-1 rounded-2xl border border-forest/15 bg-ivory p-1 sm:mx-auto">
-            {visibleMobileNav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/dashboard'}
-                className={({ isActive }) =>
-                  classNames(
-                    classNames(
-                      'flex min-w-0 w-full flex-col items-center gap-1 rounded-xl py-2 text-center text-[10px] font-medium uppercase leading-tight tracking-wide transition-colors',
-                      item.label === 'Marketplace' ? 'px-3' : 'px-1',
-                      isActive ? 'm-0.5 bg-forest text-ivory' : 'text-charcoal/55 hover:bg-forest/5 hover:text-forest'
-                    ),
-                  )
-                }
-              >
-                <item.icon className="h-4 w-4" strokeWidth={1.7} />
-                <span className={classNames(
-                  'flex min-h-[24px] items-center justify-center',
-                  item.label === 'Marketplace' ? 'px-1.5' : ''
-                )}>{item.label}</span>
-              </NavLink>
-            ))}
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen((isOpen) => !isOpen)}
-              aria-expanded={mobileMenuOpen}
-              className={classNames(
-                'flex min-w-0 w-full flex-col items-center gap-1 rounded-xl px-1 py-2 text-center text-[10px] font-medium uppercase leading-tight tracking-wide transition-colors',
-                mobileMenuOpen ? 'bg-forest text-ivory' : 'text-charcoal/55 hover:bg-forest/5 hover:text-forest'
-              )}
-            >
-              <MoreHorizontal className="h-4 w-4" strokeWidth={1.7} />
-              <span className="flex min-h-[24px] items-center justify-center">More</span>
-            </button>
-          </div>
-          )}
-        </nav>
+          </nav>
+        )}
       </div>
     </div>
-  );
-}
-
-function BuyerMobileLink({ to, label, active, children }: { to: string; label: string; active: boolean; children: ReactNode }) {
-  return (
-    <Link
-      to={to}
-      aria-current={active ? 'page' : undefined}
-      className={classNames(
-        'flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agri-green',
-        active ? 'font-semibold text-agri-green' : 'text-charcoal/60 hover:bg-forest/5'
-      )}
-    >
-      {children}<span>{label}</span>
-    </Link>
   );
 }
 
