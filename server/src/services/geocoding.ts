@@ -17,12 +17,32 @@ export class GeocodingError extends Error {
   }
 }
 
+let nextNominatimRequestAt = 0;
+
+async function waitForNominatimSlot(): Promise<void> {
+  const now = Date.now();
+  const waitMs = Math.max(0, nextNominatimRequestAt - now);
+  nextNominatimRequestAt = Math.max(now, nextNominatimRequestAt) + 1100;
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
+function logProviderFailure(provider: string, category: string, status?: number, requestId?: string): void {
+  console.warn('[location] Reverse-geocoding provider failure', {
+    provider,
+    category,
+    ...(status ? { status } : {}),
+    ...(requestId ? { requestId } : {}),
+  });
+}
+
 export async function reverseGeocode(latitude: number, longitude: number): Promise<ReverseGeocodeResult> {
-  const provider = process.env.GEOCODING_PROVIDER || 'nominatim';
-  if (provider !== 'nominatim') {
+  const provider = (process.env.GEOCODING_PROVIDER || 'nominatim').trim().toLowerCase();
+  if (!['nominatim', 'openstreetmap', 'osm'].includes(provider)) {
+    logProviderFailure(provider, 'unsupported_provider');
     throw new GeocodingError(503, 'Location lookup is temporarily unavailable. Enter your address manually.');
   }
 
+  await waitForNominatimSlot();
   const params = new URLSearchParams({
     format: 'jsonv2',
     addressdetails: '1',
@@ -34,16 +54,20 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
     response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
       headers: {
         'User-Agent': process.env.APP_BASE_URL
-          ? `AgriConnect/1.0 (${process.env.APP_BASE_URL})`
-          : 'AgriConnect/1.0',
+          ? `AgriConnect/1.0 (${process.env.APP_BASE_URL}${process.env.GEOCODING_CONTACT_EMAIL ? `; ${process.env.GEOCODING_CONTACT_EMAIL}` : ''})`
+          : `AgriConnect/1.0${process.env.GEOCODING_CONTACT_EMAIL ? ` (${process.env.GEOCODING_CONTACT_EMAIL})` : ''}`,
+        'Accept-Language': 'en',
       },
       signal: AbortSignal.timeout(8000),
     });
-  } catch {
+  } catch (error) {
+    logProviderFailure('nominatim', error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network_error');
     throw new GeocodingError(502, 'Location lookup is temporarily unavailable. Enter your address manually.');
   }
 
   if (!response.ok) {
+    const requestId = response.headers.get('x-request-id') || undefined;
+    logProviderFailure('nominatim', response.status === 429 ? 'rate_limited' : 'http_error', response.status, requestId);
     const statusCode = response.status === 429 ? 503 : 502;
     throw new GeocodingError(statusCode, 'Location lookup is temporarily unavailable. Enter your address manually.');
   }
@@ -75,7 +99,7 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
     );
   }
 
-  return {
+  const result = {
     city,
     district,
     state: address.state,
@@ -83,4 +107,5 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
     country: address.country || 'India',
     displayName: data.display_name || `${city}, ${address.state}`,
   };
+  return result;
 }

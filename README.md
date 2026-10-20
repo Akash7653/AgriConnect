@@ -112,6 +112,16 @@ cp server/.env.example server/.env
 Set `SEED_PASSWORD` in that local file before first startup if you want development seed accounts. Production never runs the seed script.
 For first production admin provisioning, register the operator as a customer and run `ADMIN_BOOTSTRAP_EMAIL=<existing-account-email> npm --prefix server run bootstrap:admin` once in a trusted environment with production `MONGODB_URI` and `JWT_SECRET` available.
 
+### Password recovery
+
+The sign-in page provides a password reset flow. Configure the backend with a valid
+`RESEND_API_KEY`, a verified `RESEND_FROM_EMAIL`, and `CLIENT_URL` set to the
+deployed frontend origin (for example,
+`https://agri-connect-seven-snowy.vercel.app`). Reset links expire after 30
+minutes and can be used once. The API returns the same request message whether
+or not an account exists for the submitted email. Never put Resend credentials
+in `VITE_*` variables.
+
 ### Destructive production data reset
 
 This operation permanently deletes every document in the selected production database except the `User` record whose email is `akash@admin.com` and whose role is `admin`. It removes orders, crops, payments, payout ledgers, user accounts, audit logs, settings, and all other collection data. It does not drop collection indexes. Take and verify an Atlas backup first. Do not run this during normal deployment or unless the database name and retained admin account have been confirmed.

@@ -88,6 +88,11 @@ export function LoginPage() {
             {show ? 'Hide password' : 'Show password'}
           </button>
         </div>
+        <div className="-mt-2 text-right">
+          <Link to="/forgot-password" className="text-sm font-medium text-agri-green hover:underline">
+            Forgot password?
+          </Link>
+        </div>
 
         {error && (
           <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-600">

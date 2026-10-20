@@ -62,6 +62,20 @@ export const AuthService = {
     return { token: response.token, user: AuthService.mapUser(response.user) };
   },
 
+  async requestPasswordReset(email: string): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/password-reset/request', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async resetPassword(token: string, password: string): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/password-reset/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
+    });
+  },
+
   async register(payload: {
     fullName: string;
     email: string;

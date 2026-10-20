@@ -95,7 +95,7 @@ export function BuyerHomeExperience() {
 
   useEffect(() => {
     let active = true;
-    if (!session || !['buyer', 'business'].includes(session.user.role)) {
+    if (session && !['buyer', 'business'].includes(session.user.role)) {
       setProducts([]);
       setLoading(false);
       setError('');
@@ -108,7 +108,7 @@ export function BuyerHomeExperience() {
         query: query.trim() || undefined,
         state: address?.state,
         district: address?.district,
-        limit: 100,
+        limit: session ? 100 : 24,
       })
         .then((items) => { if (active) setProducts(items); })
         .catch((loadError: unknown) => {
@@ -233,16 +233,20 @@ export function BuyerHomeExperience() {
           )}
         </section>
 
-        {!session || !['buyer', 'business'].includes(session.user.role) ? (
-          <section className="mt-4 rounded-3xl bg-forest p-6 text-ivory sm:p-10">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-agri-emerald">From farm to table</p>
-            <h1 className="mt-3 max-w-xl font-display text-3xl leading-tight sm:text-5xl">Discover produce listed by farmers.</h1>
-            <p className="mt-3 max-w-lg text-sm text-ivory/70">Sign in as a buyer to see current listings, seller prices, and available stock.</p>
-            <Link to="/login?redirect=%2Fdashboard%2Fmarketplace" className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-xl bg-agri-emerald px-4 text-sm font-semibold text-forest">Sign in to shop <ArrowRight className="h-4 w-4" /></Link>
+        {!session ? (
+          <section className="relative mt-3 overflow-hidden rounded-3xl bg-gradient-to-br from-forest via-[#24563a] to-[#3f7a47] px-5 py-6 text-ivory shadow-lg sm:px-9 sm:py-8">
+            <div className="absolute -right-12 -top-10 h-48 w-48 rounded-full border-[24px] border-white/5" aria-hidden="true" />
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-agri-emerald">Fresh finds, straight from farms</p>
+            <h1 className="mt-2 max-w-xl font-display text-3xl leading-tight sm:text-4xl">Your daily market, grown nearby.</h1>
+            <p className="mt-2 max-w-xl text-sm text-ivory/75">Browse real farmer listings, see current prices and stock, and choose what goes in your basket.</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Link to="/register" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-agri-emerald px-4 text-sm font-semibold text-forest">Create a buyer account <ArrowRight className="h-4 w-4" /></Link>
+              <Link to="/login?redirect=%2Fdashboard%2Fmarketplace" className="inline-flex min-h-11 items-center rounded-xl border border-white/25 px-4 text-sm font-semibold text-ivory">Sign in</Link>
+            </div>
+            <p className="mt-3 text-[11px] text-ivory/60">Sign in is required to place an order. Delivery availability is confirmed at checkout.</p>
           </section>
         ) : (
-          <>
-            <section className="mt-3 rounded-3xl bg-forest px-5 py-6 text-ivory sm:px-9 sm:py-8">
+          <section className="mt-3 rounded-3xl bg-forest px-5 py-6 text-ivory sm:px-9 sm:py-8">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-agri-emerald">AgriConnect marketplace</p>
               <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
@@ -251,7 +255,8 @@ export function BuyerHomeExperience() {
                 </div>
                 <button type="button" onClick={() => browseCategory()} className="inline-flex min-h-10 shrink-0 items-center gap-2 self-start rounded-xl border border-ivory/25 px-4 text-sm font-medium hover:bg-white/10">Browse all <ArrowRight className="h-4 w-4" /></button>
               </div>
-            </section>
+          </section>
+        )}
 
             {categories.length > 0 && (
               <section id="home-categories" className="mt-6 scroll-mt-24" aria-labelledby="home-categories-title">
@@ -351,8 +356,6 @@ export function BuyerHomeExperience() {
                 </div>
               )}
             </section>
-          </>
-        )}
       </div>
 
       {locationOpen && (

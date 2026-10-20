@@ -193,3 +193,42 @@ test('mobile storefront and buyer shopping flow work across common widths', asyn
     await context.close();
   }
 });
+
+test('guest mobile landing shows live catalogue products instead of an empty sign-in screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/socket.io/**', (route) => route.abort());
+  await page.route(`${apiOrigin}/api/storefront/campaigns`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, campaigns: [] }),
+  }));
+  await page.route(`${apiOrigin}/api/storefront/products**`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      listings: [{
+        _id: 'guest-tomato-listing',
+        cropName: 'Farm Fresh Tomatoes',
+        category: 'Vegetables',
+        unit: 'kg',
+        pricePerUnitPaise: 4200,
+        availableQuantity: 12,
+        minOrderQuantity: 1,
+        images: [],
+        location: { district: 'Hyderabad', state: 'Telangana' },
+        farmerId: { name: 'Green Farm' },
+        description: 'Fresh tomatoes listed by a verified farm.',
+      }],
+      pagination: { page: 1, limit: 24, total: 1, totalPages: 1 },
+    }),
+  }));
+
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Your daily market, grown nearby.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Shop by category' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Available produce' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add Farm Fresh Tomatoes to cart' })).toBeVisible();
+  await expect(page.getByText('by Green Farm', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});

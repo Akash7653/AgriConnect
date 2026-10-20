@@ -11,6 +11,8 @@ import { seedDatabase } from '../scripts/seed.js';
 import { randomBytes } from 'crypto';
 import { EmailOutbox } from '../models/EmailOutbox.js';
 import { queueOrderConfirmation, processEmailOutbox } from '../services/email.js';
+import bcrypt from 'bcryptjs';
+import { AuditLog } from '../models/AuditLog.js';
 
 const testSeedPassword = randomBytes(32).toString('base64url');
 
@@ -68,6 +70,81 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .get('/api/crops')
       .set('Authorization', `Bearer ${buyerToken}`);
     expect(buyerMarketplace.status).toBe(200);
+  });
+
+  it('1a. Should issue a generic password reset response and consume a reset token once', async () => {
+    const email = `password-reset-${randomBytes(8).toString('hex')}@example.test`;
+    const initialPassword = 'InitialAdminPassword123!';
+    const nextPassword = 'NewAdminPassword456!';
+    const user = await User.create({
+      name: 'Password Reset Test Admin',
+      email,
+      passwordHash: await bcrypt.hash(initialPassword, 12),
+      role: 'admin',
+      phone: '9123456789',
+      isVerified: true,
+      status: 'active',
+    });
+    const previousApiKey = process.env.RESEND_API_KEY;
+    const previousFrom = process.env.RESEND_FROM_EMAIL;
+    const previousClientUrl = process.env.CLIENT_URL;
+    let emailPayload: { text: string } | undefined;
+    const emailFetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      emailPayload = JSON.parse(String(init?.body)) as { text: string };
+      return Response.json({ id: 'reset-email-test' });
+    });
+    vi.stubEnv('RESEND_API_KEY', 'test-resend-key');
+    vi.stubEnv('RESEND_FROM_EMAIL', 'AgriConnect <support@example.test>');
+    vi.stubEnv('CLIENT_URL', 'http://localhost:3000');
+    vi.stubGlobal('fetch', emailFetch);
+
+    try {
+      const requestReset = await request(app)
+        .post('/api/auth/password-reset/request')
+        .send({ email });
+      expect(requestReset.status).toBe(202);
+      expect(emailFetch).toHaveBeenCalledTimes(1);
+
+      const resetLink = emailPayload?.text.match(/https?:\/\/\S+/)?.[0];
+      expect(resetLink).toBeTruthy();
+      const resetToken = new URL(resetLink!).hash.slice(1);
+      const decodedToken = new URLSearchParams(resetToken).get('token');
+      expect(decodedToken).toBeTruthy();
+      const storedResetHash = await User.findById(user._id).select('+passwordResetTokenHash');
+      expect(storedResetHash?.passwordResetTokenHash).not.toBe(decodedToken);
+
+      const completed = await request(app)
+        .post('/api/auth/password-reset/confirm')
+        .send({ token: decodedToken, password: nextPassword });
+      expect(completed.status).toBe(200);
+      expect((await User.findById(user._id))?.passwordResetTokenHash).toBeUndefined();
+
+      const reusedToken = await request(app)
+        .post('/api/auth/password-reset/confirm')
+        .send({ token: decodedToken, password: 'AnotherAdminPassword789!' });
+      expect(reusedToken.status).toBe(400);
+
+      const oldLogin = await request(app).post('/api/auth/login').send({ email, password: initialPassword });
+      expect(oldLogin.status).toBe(401);
+      const newLogin = await request(app).post('/api/auth/login').send({ email, password: nextPassword });
+      expect(newLogin.status).toBe(200);
+
+      const unknownEmail = await request(app)
+        .post('/api/auth/password-reset/request')
+        .send({ email: `missing-${randomBytes(8).toString('hex')}@example.test` });
+      expect(unknownEmail.status).toBe(requestReset.status);
+      expect(unknownEmail.body.message).toBe(requestReset.body.message);
+    } finally {
+      await AuditLog.deleteMany({ userId: user._id, action: 'PASSWORD_RESET_COMPLETED' });
+      await User.deleteOne({ _id: user._id });
+      vi.unstubAllGlobals();
+      if (previousApiKey === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = previousApiKey;
+      if (previousFrom === undefined) delete process.env.RESEND_FROM_EMAIL;
+      else process.env.RESEND_FROM_EMAIL = previousFrom;
+      if (previousClientUrl === undefined) delete process.env.CLIENT_URL;
+      else process.env.CLIENT_URL = previousClientUrl;
+    }
   });
 
   it('2. Should allow farmer to publish a new crop listing with inventory', async () => {
@@ -303,6 +380,18 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     }
   });
 
+  it('8a. Should expose only public-safe active product data for the mobile storefront', async () => {
+    const response = await request(app).get('/api/storefront/products').query({ limit: 24 });
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.listings.length).toBeGreaterThan(0);
+    for (const listing of response.body.listings) {
+      expect(listing.farmerId.name).toBeTruthy();
+      expect(listing.farmerId.phone).toBeUndefined();
+    }
+    expect(response.headers['cache-control']).toContain('max-age=30');
+  });
+
   it('9. Should distinguish invalid coordinates and incomplete or unavailable geocoding results', async () => {
     const previousProvider = process.env.GEOCODING_PROVIDER;
     process.env.GEOCODING_PROVIDER = 'nominatim';
@@ -314,6 +403,16 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
           state: 'Test State',
         },
         display_name: 'Test Suburb, Test State',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        address: {
+          city: 'Test City',
+          county: 'Test District',
+          state: 'Test State',
+          postcode: '12345',
+          country: 'India',
+        },
+        display_name: 'Test City, Test State',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response('', { status: 503 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -330,9 +429,15 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       expect(incompleteAddress.status).toBe(422);
       expect(incompleteAddress.body.message).toMatch(/enter your city and PIN code manually/i);
 
+      const compatibleCoordinates = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ lat: 18.5, lon: 73.8, accuracy: 20 });
+      expect(compatibleCoordinates.status).toBe(200);
+      expect(compatibleCoordinates.body.address.pinCode).toBe('12345');
+
       const providerUnavailable = await request(app)
         .post('/api/location/reverse-geocode')
-        .send({ latitude: 18.5, longitude: 73.8 });
+        .send({ latitude: 18.6, longitude: 73.8 });
       expect(providerUnavailable.status).toBe(502);
       expect(providerUnavailable.body.message).toMatch(/temporarily unavailable/i);
     } finally {
