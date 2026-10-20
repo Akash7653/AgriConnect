@@ -11,7 +11,7 @@ interface ResolvedAddress {
 }
 
 interface LocationSelectorProps {
-  onResolved: (address: Omit<ResolvedAddress, 'displayName'>) => void;
+  onResolved: (address: ResolvedAddress) => void;
 }
 
 export function LocationSelector({ onResolved }: LocationSelectorProps) {

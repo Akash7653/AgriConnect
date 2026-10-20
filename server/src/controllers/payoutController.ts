@@ -20,7 +20,7 @@ export async function getFarmerPayoutLedger(req: AuthRequest, res: Response): Pr
       .filter((l) => l.settlementStatus === 'settled')
       .reduce((acc, curr) => acc + curr.farmerPayoutPaise, 0);
     const pendingSettlement = ledgers
-      .filter((l) => l.settlementStatus === 'accrued' || l.settlementStatus === 'processing')
+      .filter((l) => ['accrued', 'processing', 'on_hold'].includes(l.settlementStatus))
       .reduce((acc, curr) => acc + curr.farmerPayoutPaise, 0);
 
     const farmerProfile = await FarmerProfile.findOne({ userId: req.user._id });

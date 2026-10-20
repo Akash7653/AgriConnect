@@ -1,5 +1,7 @@
-import { request } from './api';
+import { API_BASE_URL } from '@/config/app';
+import { ApiError, request } from './api';
 import type { CropProduct, ProductCategory } from '@/types';
+import type { AuthSession } from '@/types';
 
 interface ProductListResponse {
   listings: Array<{
@@ -15,6 +17,8 @@ interface ProductListResponse {
     isOrganicCertified?: boolean;
     qualityGrade?: string;
     harvestDate?: string;
+    description?: string;
+    minOrderQuantity?: number;
   }>;
 }
 
@@ -40,19 +44,66 @@ function mapListing(listing: ProductListResponse['listings'][number]): CropProdu
     stockKg: listing.availableQuantity,
     origin: [listing.location?.district, listing.location?.state].filter(Boolean).join(', '),
     farmerName: listing.farmerId?.name ?? 'Verified farmer',
-    imageUrl: listing.images?.[0] ?? 'https://images.unsplash.com/photo-1597362925123-77861d3fbac7?auto=format&fit=crop&w=800&q=80',
+    imageUrl: listing.images?.[0] ?? '',
     harvestDate: listing.harvestDate ?? new Date().toISOString(),
     isOrganic: Boolean(listing.isOrganicCertified),
+    description: listing.description ?? '',
+    minOrderQuantity: listing.minOrderQuantity ?? 1,
   };
 }
 
 export const ProductsService = {
-  async list(filters?: { category?: ProductCategory; query?: string }): Promise<CropProduct[]> {
+  async list(session: AuthSession, filters?: { category?: ProductCategory; query?: string; state?: string; district?: string }): Promise<CropProduct[]> {
     const params = new URLSearchParams();
     if (filters?.category) params.set('category', categoryNames[filters.category]);
     if (filters?.query) params.set('search', filters.query);
+    if (filters?.state) params.set('state', filters.state);
+    if (filters?.district) params.set('district', filters.district);
     const qs = params.toString();
-    const data = await request<ProductListResponse>(`/crops${qs ? `?${qs}` : ''}`);
+    const data = await request<ProductListResponse>(`/crops${qs ? `?${qs}` : ''}`, { token: session.token });
     return data.listings.map(mapListing);
   },
 };
+
+export function uploadProductImage(
+  session: AuthSession,
+  listingId: string,
+  file: File,
+  onProgress: (percentage: number) => void,
+): Promise<{ image: { url: string; publicId: string } }> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('image', file);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}/crops/${encodeURIComponent(listingId)}/images`);
+    xhr.setRequestHeader('Authorization', `Bearer ${session.token}`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    };
+    xhr.onerror = () => reject(new ApiError('Network error while uploading the product image.'));
+    xhr.onload = () => {
+      let response: { image?: { url: string; publicId: string }; message?: string };
+      try {
+        response = JSON.parse(xhr.responseText) as typeof response;
+      } catch {
+        reject(new ApiError('The image server returned an invalid response.', xhr.status));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || !response.image) {
+        reject(new ApiError(response.message || `Image upload failed (${xhr.status}).`, xhr.status));
+        return;
+      }
+      onProgress(100);
+      resolve({ image: response.image });
+    };
+    xhr.send(form);
+  });
+}
+
+export async function removeProductImage(session: AuthSession, listingId: string, publicId: string): Promise<void> {
+  await request(`/crops/${encodeURIComponent(listingId)}/images`, {
+    method: 'DELETE',
+    token: session.token,
+    body: JSON.stringify({ publicId }),
+  });
+}

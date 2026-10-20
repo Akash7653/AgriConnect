@@ -43,11 +43,13 @@ export const createPaymentOrderSchema = z.object({
     date: z.string(),
     timeWindow: z.string().default('07:00 AM - 11:00 AM'),
   }),
+  paymentMethod: z.enum(['razorpay', 'cod']).default('razorpay'),
   idempotencyKey: z.string().optional(),
 });
 
 export async function createPaymentOrder(req: AuthRequest, res: Response): Promise<void> {
   const reservedItems: Array<{ listingId: string; quantity: number }> = [];
+  let orderCreated = false;
 
   try {
     if (!req.user) {
@@ -56,6 +58,26 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
     }
 
     const data = createPaymentOrderSchema.parse(req.body);
+    if (data.idempotencyKey) {
+      const existingOrder = await Order.findOne({
+        idempotencyKey: data.idempotencyKey,
+        buyerId: req.user._id,
+      });
+      if (existingOrder) {
+        res.json({
+          success: true,
+          message: 'Order already processed (idempotent)',
+          orderId: existingOrder._id,
+          orderNumber: existingOrder.orderNumber,
+          paymentMethod: existingOrder.payment.gateway === 'cod_verified' ? 'cod' : 'razorpay',
+          amountPaise: existingOrder.pricing.finalPayablePaise,
+          currency: 'INR',
+          ...(existingOrder.payment.paymentOrderId ? { razorpayOrderId: existingOrder.payment.paymentOrderId } : {}),
+          ...(existingOrder.payment.gateway !== 'cod_verified' ? { keyId: process.env.RAZORPAY_KEY_ID } : {}),
+        });
+        return;
+      }
+    }
 
     const serviceability = await checkServiceability(data.deliveryAddress);
     if (serviceability.configured && !serviceability.serviceable) {
@@ -163,17 +185,21 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const orderNumber = `AGC-${timestamp}-${randomSuffix}`;
 
-    // Create Razorpay Order
-    const rzpOrder = await createRazorpayOrder({
-      amountPaise: finalPayablePaise,
-      currency: 'INR',
-      receipt: orderNumber,
-      notes: {
-        buyerId: req.user._id.toString(),
-        buyerEmail: req.user.email,
-        orderNumber,
-      },
-    });
+    const rzpOrder = data.paymentMethod === 'razorpay'
+      ? await createRazorpayOrder({
+        amountPaise: finalPayablePaise,
+        currency: 'INR',
+        receipt: orderNumber,
+        notes: {
+          buyerId: req.user._id.toString(),
+          buyerEmail: req.user.email,
+          orderNumber,
+        },
+      })
+      : undefined;
+    const initialOrderStatus = data.paymentMethod === 'cod'
+      ? ORDER_STATUSES.CONFIRMED
+      : ORDER_STATUSES.PENDING_PAYMENT;
 
     const order = await Order.create({
       orderNumber,
@@ -192,11 +218,13 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
       },
       deliveryAddress: data.deliveryAddress,
       deliverySlot: data.deliverySlot,
-      status: ORDER_STATUSES.PENDING_PAYMENT,
+      status: initialOrderStatus,
       statusHistory: [
         {
-          status: ORDER_STATUSES.PENDING_PAYMENT,
-          note: 'Order created, awaiting Razorpay test payment authorization',
+          status: initialOrderStatus,
+          note: data.paymentMethod === 'cod'
+            ? 'Order confirmed with cash due on delivery'
+            : 'Order created, awaiting Razorpay payment authorization',
           timestamp: new Date(),
           updatedBy: req.user._id,
           role: req.user.role,
@@ -204,31 +232,70 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
       ],
       payment: {
         status: 'pending',
-        gateway: 'razorpay_standard',
-        paymentOrderId: rzpOrder.id,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        gateway: data.paymentMethod === 'cod' ? 'cod_verified' : 'razorpay_standard',
+        ...(rzpOrder ? { paymentOrderId: rzpOrder.id, expiresAt: new Date(Date.now() + 15 * 60 * 1000) } : {}),
       },
       idempotencyKey: data.idempotencyKey,
     });
+    orderCreated = true;
+
+    if (data.paymentMethod === 'cod') {
+      const farmerTotals = new Map<string, { farmerName: string; totalPaise: number }>();
+      for (const item of orderItems) {
+        const farmerId = item.farmerId.toString();
+        const existing = farmerTotals.get(farmerId) || { farmerName: item.farmerName, totalPaise: 0 };
+        existing.totalPaise += item.totalPaise;
+        farmerTotals.set(farmerId, existing);
+      }
+      for (const [farmerId, info] of farmerTotals) {
+        await Notification.create({
+          recipientId: farmerId,
+          title: 'New cash-on-delivery order',
+          message: `Order #${order.orderNumber} includes your produce. Payment is due in cash on delivery.`,
+          type: 'order',
+          link: `/farmer/orders/${order._id}`,
+        });
+        RealtimeNotifier.emitNewOrderToFarmer(farmerId, {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          amount: info.totalPaise,
+          buyerName: req.user.name,
+        });
+      }
+      await Notification.create({
+        recipientId: req.user._id,
+        title: 'Order placed successfully',
+        message: `Order #${order.orderNumber} is confirmed. Pay ₹${(finalPayablePaise / 100).toFixed(2)} in cash when it is delivered.`,
+        type: 'order',
+        link: `/buyer/orders/${order._id}`,
+      });
+      void queueOrderConfirmation(order._id.toString()).catch(() => console.warn('Order confirmation email could not be queued.'));
+      RealtimeNotifier.emitAdminMetricsRefresh({ type: 'cod_order_created' });
+    }
 
     res.status(201).json({
       success: true,
-      message: 'Payment order created with stock reserved',
+      message: data.paymentMethod === 'cod'
+        ? 'Order placed. Cash payment is due on delivery.'
+        : 'Payment order created with stock reserved',
       orderId: order._id,
       orderNumber: order.orderNumber,
-      razorpayOrderId: rzpOrder.id,
+      paymentMethod: data.paymentMethod,
+      ...(rzpOrder ? { razorpayOrderId: rzpOrder.id } : {}),
       amountPaise: finalPayablePaise,
       currency: 'INR',
-      keyId: process.env.RAZORPAY_KEY_ID,
+      ...(rzpOrder ? { keyId: process.env.RAZORPAY_KEY_ID } : {}),
     });
   } catch (err: any) {
-    for (const reserved of reservedItems) {
-      await CropListing.findByIdAndUpdate(reserved.listingId, {
-        $inc: {
-          availableQuantity: reserved.quantity,
-          reservedQuantity: -reserved.quantity,
-        },
-      });
+    if (!orderCreated) {
+      for (const reserved of reservedItems) {
+        await CropListing.findByIdAndUpdate(reserved.listingId, {
+          $inc: {
+            availableQuantity: reserved.quantity,
+            reservedQuantity: -reserved.quantity,
+          },
+        });
+      }
     }
 
     const statusCode = err.statusCode || err.status || 500;

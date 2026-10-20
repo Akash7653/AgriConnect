@@ -30,7 +30,6 @@ export interface NavItem {
 export const navByRole: Record<UserRole, NavItem[]> = {
   farmer: [
     { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
-    { label: 'Marketplace', to: '/dashboard/marketplace', icon: Store },
     { label: 'Crop Listings', to: '/dashboard/listings', icon: Sprout },
     { label: 'Orders', to: '/dashboard/orders', icon: ShoppingBag },
     { label: 'Payouts', to: '/dashboard/payouts', icon: Wallet },
@@ -45,15 +44,20 @@ export const navByRole: Record<UserRole, NavItem[]> = {
   ],
   logistics: [
     { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
-    { label: 'Marketplace', to: '/dashboard/marketplace', icon: Store },
     { label: 'Pickups', to: '/dashboard/pickups', icon: TruckIcon },
     { label: 'Deliveries', to: '/dashboard/deliveries', icon: Truck },
   ],
   admin: [
     { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
     { label: 'Users', to: '/dashboard/users', icon: Users },
+    { label: 'Orders', to: '/dashboard/orders', icon: ShoppingBag },
+  ],
+  business: [
+    { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
     { label: 'Marketplace', to: '/dashboard/marketplace', icon: Store },
     { label: 'Orders', to: '/dashboard/orders', icon: ShoppingBag },
+    { label: 'Suppliers', to: '/dashboard/suppliers', icon: Users },
+    { label: 'Invoices', to: '/dashboard/invoices', icon: ClipboardList },
   ],
 };
 
@@ -118,14 +122,6 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
         </nav>
 
         <div className="p-4 border-t border-ivory/10">
-          {role === 'buyer' || role === 'admin' ? (
-            <Link
-              to="/dashboard/marketplace"
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-ivory/60 hover:bg-ivory/5 hover:text-ivory transition-colors"
-            >
-              <Store className="h-4 w-4" strokeWidth={1.5} /> Marketplace
-            </Link>
-          ) : null}
           <button
             onClick={handleSignOut}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-ivory/60 hover:bg-ivory/5 hover:text-ivory transition-colors"
@@ -177,14 +173,6 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
                     <span>{item.label}</span>
                   </NavLink>
                 ))}
-                <Link
-                  to="/dashboard/marketplace"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm text-forest transition-colors hover:bg-forest/5"
-                >
-                  <Store className="h-4 w-4 shrink-0" strokeWidth={1.7} />
-                  <span>Marketplace</span>
-                </Link>
                 <button
                   type="button"
                   onClick={handleSignOut}

@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { z } from 'zod';
-import { Order, IOrderItem } from '../models/Order.js';
+import { Order, IOrder, IOrderItem } from '../models/Order.js';
 import { CropListing } from '../models/CropListing.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
 import { Notification } from '../models/Notification.js';
@@ -8,6 +8,7 @@ import { SystemSettings } from '../models/SystemSettings.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { ORDER_STATUSES, USER_ROLES, DEFAULT_PRICING_CONFIG, OrderStatus } from '../config/constants.js';
 import { RealtimeNotifier } from '../socket/index.js';
+import { queueOrderUpdate } from '../services/email.js';
 
 export const createOrderSchema = z.object({
   items: z
@@ -237,7 +238,6 @@ export async function createOrder(req: AuthRequest, res: Response): Promise<void
       type: 'order',
       link: `/buyer/orders/${order._id}`,
     });
-
     res.status(201).json({
       success: true,
       message: 'Order placed and stock reserved successfully',
@@ -263,6 +263,42 @@ export async function getBuyerOrders(req: AuthRequest, res: Response): Promise<v
   }
 }
 
+function farmerVisibleOrder(order: IOrder, farmerId: string) {
+  const data = order.toObject() as IOrder;
+  const items = data.items.filter((item) => item.farmerId.toString() === farmerId);
+  const farmerGrossPaise = items.reduce((sum, item) => sum + item.totalPaise, 0);
+  return {
+    ...data,
+    buyerName: undefined,
+    buyerPhone: undefined,
+    items,
+    pricing: {
+      ...data.pricing,
+      grossProductValuePaise: farmerGrossPaise,
+      finalPayablePaise: farmerGrossPaise,
+      deliveryFeePaise: 0,
+    },
+    deliveryAddress: {
+      city: data.deliveryAddress.city,
+      district: data.deliveryAddress.district,
+      state: data.deliveryAddress.state,
+      pinCode: data.deliveryAddress.pinCode,
+    },
+    statusHistory: data.statusHistory.map(({ status, note, timestamp, role }) => ({ status, note, timestamp, role })),
+    logistics: {
+      partnerName: data.logistics?.partnerName,
+      pickupTime: data.logistics?.pickupTime,
+      dispatchedTime: data.logistics?.dispatchedTime,
+      deliveredTime: data.logistics?.deliveredTime,
+      assignmentHistory: (data.logistics?.assignmentHistory ?? []).map((entry) => ({
+        deliveryAgentName: entry.deliveryAgentName,
+        assignedAt: entry.assignedAt,
+        previousAgentName: entry.previousAgentName,
+      })),
+    },
+  };
+}
+
 export async function getFarmerOrders(req: AuthRequest, res: Response): Promise<void> {
   try {
     if (!req.user) {
@@ -272,7 +308,10 @@ export async function getFarmerOrders(req: AuthRequest, res: Response): Promise<
 
     const orders = await Order.find({ 'items.farmerId': req.user._id }).sort({ createdAt: -1 });
 
-    res.json({ success: true, orders });
+    res.json({
+      success: true,
+      orders: orders.map((order) => farmerVisibleOrder(order, req.user!._id.toString())),
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -305,7 +344,12 @@ export async function getOrderById(req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    res.json({ success: true, order });
+    res.json({
+      success: true,
+      order: req.user.role === USER_ROLES.FARMER
+        ? farmerVisibleOrder(order, req.user._id.toString())
+        : order,
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -345,6 +389,10 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
       res.status(409).json({ success: false, message: 'Paid orders require an approved refund workflow before cancellation.' });
       return;
     }
+    if (status === ORDER_STATUSES.CONFIRMED && order.payment.status !== 'captured') {
+      res.status(409).json({ success: false, message: 'An order cannot be confirmed until payment is captured.' });
+      return;
+    }
 
     // Validate state machine transitions
     const validTransitions: Record<string, string[]> = {
@@ -374,8 +422,12 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
       res.status(403).json({ success: false, message: 'Farmers can only advance preparation states.' });
       return;
     }
-    if (isLogisticsAssigned && !isAdmin && !logisticsStatuses.includes(status as any)) {
-      res.status(403).json({ success: false, message: 'Delivery partners can only advance delivery states.' });
+    if (logisticsStatuses.includes(status as any) && (
+      status === ORDER_STATUSES.DELIVERED ||
+      req.user.role !== USER_ROLES.LOGISTICS ||
+      !isLogisticsAssigned
+    )) {
+      res.status(403).json({ success: false, message: 'Delivery status changes must be performed by the assigned partner; delivery completion requires the proof-of-delivery endpoint.' });
       return;
     }
 
@@ -438,6 +490,27 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
       type: 'order',
       link: `/buyer/orders/${order._id}`,
     });
+    await queueOrderUpdate(
+      order._id.toString(),
+      `status:${status}`,
+      `Order ${order.orderNumber} status changed to ${status.replace(/_/g, ' ')}.`
+    );
+    for (const farmerId of new Set(order.items.map((item) => item.farmerId.toString()))) {
+      await Notification.create({
+        recipientId: farmerId,
+        title: `Order status: ${status.replace(/_/g, ' ')}`,
+        message: `Order #${order.orderNumber} status changed to ${status.replace(/_/g, ' ')}.`,
+        type: 'order',
+        link: `/farmer/orders/${order._id}`,
+      });
+      RealtimeNotifier.emitOrderStatusUpdate(farmerId, order._id.toString(), {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        note,
+        timestamp: new Date(),
+      });
+    }
 
     RealtimeNotifier.emitOrderStatusUpdate(order.buyerId.toString(), order._id.toString(), {
       orderId: order._id,

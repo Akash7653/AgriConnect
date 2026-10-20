@@ -14,8 +14,23 @@ export const registerSchema = z.object({
   email: z.string().email('Invalid email address').max(254),
   password: z.string().min(12, 'Password must be at least 12 characters').max(128),
   phone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/, 'Invalid phone number'),
+  role: z.enum([USER_ROLES.FARMER, USER_ROLES.BUYER, USER_ROLES.BUSINESS, USER_ROLES.LOGISTICS]).default(USER_ROLES.BUYER),
+  farm: z.object({
+    farmName: z.string().trim().min(2).max(100),
+    village: z.string().trim().min(2).max(80),
+    district: z.string().trim().min(2).max(80),
+    state: z.string().trim().min(2).max(80),
+    pinCode: z.string().trim().min(5).max(12),
+  }).strict().optional(),
   language: z.enum(['en', 'te', 'hi']).default('en'),
-}).strict();
+}).strict().superRefine((data, context) => {
+  if (data.role === USER_ROLES.FARMER && !data.farm) {
+    context.addIssue({ code: 'custom', path: ['farm'], message: 'Farm details are required for a farmer access request' });
+  }
+  if (data.role !== USER_ROLES.FARMER && data.farm) {
+    context.addIssue({ code: 'custom', path: ['farm'], message: 'Farm details can only be submitted with a farmer access request' });
+  }
+});
 
 export const loginSchema = z.object({
   email: z.string().email().max(254),
@@ -53,10 +68,12 @@ export async function register(req: Request, res: Response): Promise<void> {
       email: data.email.toLowerCase(),
       passwordHash,
       role: USER_ROLES.BUYER,
+      ...(data.role !== USER_ROLES.BUYER ? { requestedRole: data.role } : {}),
+      ...(data.role === USER_ROLES.FARMER && data.farm ? { requestedFarm: data.farm } : {}),
       phone: data.phone,
       language: data.language,
       isVerified: true,
-      status: 'active',
+      status: data.role === USER_ROLES.BUYER ? 'active' : 'pending_verification',
     });
 
     // Create role-specific profile
@@ -73,7 +90,7 @@ export async function register(req: Request, res: Response): Promise<void> {
       userId: user._id,
       userName: user.name,
       role: user.role,
-      details: { email: user.email, role: user.role },
+      details: { email: user.email, role: user.role, requestedRole: user.requestedRole },
       ipAddress: req.ip,
     });
 
@@ -88,9 +105,13 @@ export async function register(req: Request, res: Response): Promise<void> {
         name: user.name,
         email: user.email,
         role: user.role,
+        requestedRole: user.requestedRole,
+        requestedFarm: user.requestedFarm,
+        status: user.status,
         phone: user.phone,
         language: user.language,
         isVerified: user.isVerified,
+        address: user.address,
       },
     });
   } catch (err: any) {
@@ -143,9 +164,13 @@ export async function login(req: Request, res: Response): Promise<void> {
         name: user.name,
         email: user.email,
         role: user.role,
+        requestedRole: user.requestedRole,
+        requestedFarm: user.requestedFarm,
+        status: user.status,
         phone: user.phone,
         language: user.language,
         isVerified: user.isVerified,
+        address: user.address,
       },
     });
   } catch (err: any) {

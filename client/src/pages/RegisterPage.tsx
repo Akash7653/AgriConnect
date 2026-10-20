@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, Lock, Mail, User, Loader2 } from 'lucide-react';
 import { AuthLayout } from '@/components/auth/AuthLayout';
 import { Input } from '@/components/ui';
@@ -10,11 +10,18 @@ export function RegisterPage() {
   const { signUp, isBackendConfigured } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const validRoles = ['buyer', 'farmer', 'business', 'logistics'] as const;
+  type RegistrationRole = (typeof validRoles)[number];
+  const queryRole = searchParams.get('role');
+  const initialRole: RegistrationRole = validRoles.find((role) => role === queryRole) ?? 'buyer';
+  const [role, setRole] = useState<RegistrationRole>(initialRole);
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [farm, setFarm] = useState({ farmName: '', village: '', district: '', state: '', pinCode: '' });
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -38,6 +45,10 @@ export function RegisterPage() {
       setError('Passwords do not match.');
       return;
     }
+    if (role === 'farmer' && Object.values(farm).some((value) => !value.trim())) {
+      setError('Please complete all farm details for your farmer access request.');
+      return;
+    }
     if (!isBackendConfigured) {
       setError(
         'Backend not configured. Set VITE_API_BASE_URL to enable registration. This is a development-only message.'
@@ -46,8 +57,13 @@ export function RegisterPage() {
     }
     setLoading(true);
     try {
-      await signUp({ fullName, email, password, phone });
-      showToast('Your account was created successfully.', 'success');
+      await signUp({ fullName, email, password, phone, role, ...(role === 'farmer' ? { farm } : {}) });
+      showToast(
+        role === 'buyer'
+          ? 'Your buyer account was created successfully.'
+          : `Your buyer account is ready. Your ${role} access request is pending admin approval.`,
+        'success'
+      );
       navigate('/dashboard');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed.';
@@ -72,9 +88,40 @@ export function RegisterPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
+        <label className="block text-sm font-medium text-charcoal">
+          Register as
+          <select
+            name="role"
+            value={role}
+            onChange={(event) => setRole(event.target.value as RegistrationRole)}
+            className="mt-1 w-full rounded-lg border border-forest/15 bg-ivory px-3 py-2.5"
+          >
+            <option value="buyer">Buyer</option>
+            <option value="farmer">Farmer / FPO</option>
+            <option value="business">Business buyer</option>
+            <option value="logistics">Delivery partner</option>
+          </select>
+        </label>
         <p className="rounded-lg bg-forest/5 p-3 text-sm text-charcoal/65">
-          This creates a customer account. Farmer, business, and delivery access requires separate admin approval.
+          {role === 'buyer'
+            ? 'Buyer access is available after registration.'
+            : `You can use buyer features immediately. ${role === 'farmer' ? 'Farmer' : role === 'business' ? 'Business buyer' : 'Delivery partner'} features become available after an administrator reviews and approves your request.`}
         </p>
+        {role === 'farmer' && (
+          <fieldset className="grid gap-3 rounded-xl border border-forest/10 p-4 sm:grid-cols-2">
+            <legend className="px-1 text-sm font-semibold text-forest">Farm details for review</legend>
+            {Object.entries(farm).map(([field, value]) => (
+              <Input
+                key={field}
+                label={field === 'pinCode' ? 'PIN code' : field.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase())}
+                name={`farm-${field}`}
+                autoComplete="off"
+                value={value}
+                onChange={(event) => setFarm((current) => ({ ...current, [field]: event.target.value }))}
+              />
+            ))}
+          </fieldset>
+        )}
 
         <Input
           label="Full name"

@@ -1,5 +1,5 @@
 import { API_BASE_URL, AppConfig } from '@/config/app';
-import type { AuthSession, User, UserRole } from '@/types';
+import type { AuthSession, User } from '@/types';
 
 export class ApiError extends Error {
   status: number;
@@ -40,6 +40,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return (await res.json()) as T;
 }
 
+interface AuthResponse {
+  token: string;
+  user: Partial<User> & { email: string; name?: string };
+}
+
 export const AuthService = {
   isBackendConfigured: AppConfig.isBackendConfigured,
 
@@ -50,10 +55,11 @@ export const AuthService = {
         0
       );
     }
-    return request<AuthSession>('/auth/login', {
+    const response = await request<AuthResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
+    return { token: response.token, user: AuthService.mapUser(response.user) };
   },
 
   async register(payload: {
@@ -61,6 +67,14 @@ export const AuthService = {
     email: string;
     password: string;
     phone: string;
+    role: Exclude<User['role'], 'admin'>;
+    farm?: {
+      farmName: string;
+      village: string;
+      district: string;
+      state: string;
+      pinCode: string;
+    };
   }): Promise<AuthSession> {
     if (!AppConfig.isBackendConfigured) {
       throw new ApiError(
@@ -68,15 +82,18 @@ export const AuthService = {
         0
       );
     }
-    return request<AuthSession>('/auth/register', {
+    const response = await request<AuthResponse>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({
         name: payload.fullName,
         email: payload.email,
         password: payload.password,
         phone: payload.phone,
+        role: payload.role,
+        ...(payload.farm ? { farm: payload.farm } : {}),
       }),
     });
+    return { token: response.token, user: AuthService.mapUser(response.user) };
   },
 
   persistSession(session: AuthSession) {
@@ -97,12 +114,16 @@ export const AuthService = {
     localStorage.removeItem('agriconnect_session');
   },
 
-  mapUser(u: Partial<User> & { email: string }): User {
+  mapUser(u: Partial<User> & { email: string; name?: string }): User {
     return {
       id: u.id ?? 'unknown',
       email: u.email,
-      fullName: u.fullName ?? '',
+      fullName: u.fullName ?? u.name ?? '',
+      ...(u.phone ? { phone: u.phone } : {}),
       role: u.role ?? 'buyer',
+      ...(u.requestedRole ? { requestedRole: u.requestedRole } : {}),
+      ...(u.requestedFarm ? { requestedFarm: u.requestedFarm } : {}),
+      ...(u.address ? { address: u.address } : {}),
     };
   },
 };

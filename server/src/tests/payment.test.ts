@@ -42,6 +42,57 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
     listingId = crop!._id.toString();
   });
 
+  it('1a. Creates cash-on-delivery orders without Razorpay and reuses the idempotency key', async () => {
+    const before = await CropListing.findById(listingId);
+    const idempotencyKey = `cod-checkout-${Date.now()}`;
+    const payload = {
+      items: [{ listingId, quantity: 1 }],
+      deliveryAddress: {
+        recipientName: 'Priya Sharma',
+        phone: '9123456789',
+        addressLine1: 'Madhapur',
+        city: 'Hyderabad',
+        district: 'Hyderabad',
+        state: 'Telangana',
+        pinCode: '500081',
+      },
+      deliverySlot: { date: new Date().toISOString().slice(0, 10), timeWindow: '07:00 AM - 11:00 AM' },
+      paymentMethod: 'cod',
+      idempotencyKey,
+    };
+
+    const created = await request(app)
+      .post('/api/payment/create-order')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send(payload);
+    expect(created.status).toBe(201);
+    expect(created.body.paymentMethod).toBe('cod');
+    expect(created.body.razorpayOrderId).toBeUndefined();
+
+    const order = await Order.findById(created.body.orderId);
+    expect(order?.status).toBe('confirmed');
+    expect(order?.payment.status).toBe('pending');
+    expect(order?.payment.gateway).toBe('cod_verified');
+    expect(order?.payment.paymentOrderId).toBeUndefined();
+
+    const repeated = await request(app)
+      .post('/api/payment/create-order')
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send(payload);
+    expect(repeated.status).toBe(200);
+    expect(repeated.body.orderId).toBe(created.body.orderId);
+    const afterRepeat = await CropListing.findById(listingId);
+    expect(afterRepeat?.availableQuantity).toBe(before!.availableQuantity - 1);
+
+    const cancelled = await request(app)
+      .patch(`/api/orders/${created.body.orderId}/status`)
+      .set('Authorization', `Bearer ${buyerToken}`)
+      .send({ status: 'cancelled', note: 'Test order cancelled' });
+    expect(cancelled.status).toBe(200);
+    const afterCancel = await CropListing.findById(listingId);
+    expect(afterCancel?.availableQuantity).toBe(before!.availableQuantity);
+  });
+
   it('2. Should create Razorpay order with server-calculated amount and atomic stock reservation', async () => {
     const listingBefore = await CropListing.findById(listingId);
     const initialAvailable = listingBefore!.availableQuantity;

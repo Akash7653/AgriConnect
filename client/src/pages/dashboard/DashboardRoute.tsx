@@ -2,6 +2,10 @@ import type { ComponentType } from 'react';
 import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   FarmerDashboard,
+  FarmerInsightsPage,
+  FarmerListingsPage,
+  FarmerOrdersPage,
+  FarmerPayoutsPage,
   BuyerDashboard,
   LogisticsDashboard,
   AdminDashboard,
@@ -15,6 +19,7 @@ import { navByRole } from '@/components/dashboard/DashboardShell';
 const dashboards: Record<UserRole, ComponentType> = {
   farmer: FarmerDashboard,
   buyer: BuyerDashboard,
+  business: BuyerDashboard,
   logistics: LogisticsDashboard,
   admin: AdminDashboard,
 };
@@ -41,6 +46,9 @@ export function DashboardRoute() {
   if (!section) return <Dash />;
 
   if (section === 'marketplace') {
+    if (role !== 'buyer' && role !== 'business') {
+      return <Navigate to="/dashboard" replace />;
+    }
     return (
       <DashboardShell
         role={role}
@@ -51,6 +59,16 @@ export function DashboardRoute() {
       </DashboardShell>
     );
   }
+
+  if (role === 'farmer') {
+    if (section === 'listings') return <FarmerListingsPage />;
+    if (section === 'orders') return <FarmerOrdersPage />;
+    if (section === 'payouts') return <FarmerPayoutsPage />;
+    if (section === 'insights') return <FarmerInsightsPage />;
+  }
+
+  if (role === 'admin' && section === 'users') return <AdminDashboard />;
+  if (role === 'admin' && section === 'orders') return <AdminDashboard />;
 
   const item = navByRole[role].find((navItem) => navItem.to.endsWith(`/${section}`));
   if (!item) return <Navigate to="/dashboard" replace />;

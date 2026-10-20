@@ -11,13 +11,16 @@ export interface DeliveryAddress {
   pinCode: string;
 }
 
+export type CheckoutPaymentMethod = 'razorpay' | 'cod';
+
 interface PaymentOrderResponse {
   orderId: string;
   orderNumber: string;
-  razorpayOrderId: string;
+  paymentMethod: CheckoutPaymentMethod;
+  razorpayOrderId?: string;
   amountPaise: number;
   currency: string;
-  keyId: string;
+  keyId?: string;
 }
 
 export interface PaymentHistoryEntry {
@@ -102,13 +105,21 @@ async function loadRazorpay(): Promise<RazorpayConstructor> {
 }
 
 export const PaymentService = {
-  async createOrder(session: AuthSession, items: CartItem[], deliveryAddress: DeliveryAddress) {
+  async createOrder(
+    session: AuthSession,
+    items: CartItem[],
+    deliveryAddress: DeliveryAddress,
+    paymentMethod: CheckoutPaymentMethod,
+    idempotencyKey: string
+  ) {
     return request<PaymentOrderResponse>('/payment/create-order', {
       method: 'POST',
       token: session.token,
       body: JSON.stringify({
         items: items.map((item) => ({ listingId: item.productId, quantity: item.quantity })),
         deliveryAddress,
+        paymentMethod,
+        idempotencyKey,
         deliverySlot: {
           date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
           timeWindow: '07:00 AM - 11:00 AM',
@@ -137,6 +148,9 @@ export const PaymentService = {
     onError: (message: string) => void
   ) {
     try {
+      if (order.paymentMethod !== 'razorpay' || !order.keyId || !order.razorpayOrderId) {
+        throw new Error('Secure online payment details are unavailable.');
+      }
       const Razorpay = await loadRazorpay();
       const checkout = new Razorpay({
         key: order.keyId,

@@ -10,6 +10,25 @@ export async function queueOrderConfirmation(orderId: string): Promise<void> {
   );
 }
 
+export async function queueOrderUpdate(orderId: string, eventKey: string, message: string): Promise<void> {
+  const key = `order-update:${orderId}:${eventKey}`;
+  await EmailOutbox.updateOne(
+    { eventKey: key },
+    {
+      $setOnInsert: {
+        eventKey: key,
+        type: 'order_update',
+        orderId,
+        eventMessage: message.slice(0, 500),
+        status: 'queued',
+        attempts: 0,
+        nextAttemptAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] || character));
 }
@@ -35,7 +54,7 @@ export async function processEmailOutbox(now = new Date()): Promise<number> {
 
     try {
       const [order, buyer] = await Promise.all([
-        Order.findById(item.orderId).select('orderNumber pricing.finalPayablePaise items'),
+        Order.findById(item.orderId).select('orderNumber pricing.finalPayablePaise items buyerId'),
         Order.findById(item.orderId).select('buyerId').then((value) => value ? User.findById(value.buyerId).select('email name') : null),
       ]);
       if (!order || !buyer?.email) throw new Error('Order recipient could not be resolved.');
@@ -44,6 +63,13 @@ export async function processEmailOutbox(now = new Date()): Promise<number> {
       const name = escapeHtml(buyer.name);
       const total = (order.pricing.finalPayablePaise / 100).toFixed(2);
       const itemSummary = order.items.map((entry) => `${escapeHtml(entry.cropName)} × ${entry.quantity} ${escapeHtml(entry.unit)}`).join(', ');
+      const eventMessage = escapeHtml(item.eventMessage || `Your order ${orderNumber} has a delivery update.`);
+      const isOrderUpdate = item.type === 'order_update';
+      const recipients = isOrderUpdate
+        ? await User.find({ _id: { $in: [order.buyerId, ...new Set(order.items.map((entry) => entry.farmerId.toString()))] } }).select('email').lean()
+        : [buyer];
+      const recipientEmails = [...new Set(recipients.map((recipient) => recipient.email).filter((email): email is string => Boolean(email)))];
+      if (!recipientEmails.length) throw new Error('Order recipients could not be resolved.');
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -53,10 +79,14 @@ export async function processEmailOutbox(now = new Date()): Promise<number> {
         },
         body: JSON.stringify({
           from,
-          to: [buyer.email],
-          subject: `AgriConnect order confirmed: ${orderNumber}`,
-          html: `<p>Hello ${name},</p><p>Your payment is verified and order <strong>${orderNumber}</strong> is confirmed.</p><p>${itemSummary}</p><p>Total paid: INR ${total}</p>`,
-          text: `Hello ${buyer.name}. Your payment is verified and order ${order.orderNumber} is confirmed. Items: ${itemSummary}. Total paid: INR ${total}.`,
+          to: recipientEmails,
+          subject: isOrderUpdate ? `AgriConnect order update: ${orderNumber}` : `AgriConnect order confirmed: ${orderNumber}`,
+          html: isOrderUpdate
+            ? `<p>${eventMessage}</p><p>Order <strong>${orderNumber}</strong></p><p>${itemSummary}</p>`
+            : `<p>Hello ${name},</p><p>Your payment is verified and order <strong>${orderNumber}</strong> is confirmed.</p><p>${itemSummary}</p><p>Total paid: INR ${total}</p>`,
+          text: isOrderUpdate
+            ? `${item.eventMessage || `Your order ${order.orderNumber} has a delivery update.`} Order ${order.orderNumber}. Items: ${itemSummary}.`
+            : `Hello ${buyer.name}. Your payment is verified and order ${order.orderNumber} is confirmed. Items: ${itemSummary}. Total paid: INR ${total}.`,
         }),
         signal: AbortSignal.timeout(10_000),
       });

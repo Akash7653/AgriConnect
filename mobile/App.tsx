@@ -79,7 +79,11 @@ export default function App() {
     setBusy(true);
     setError('');
     try {
-      const result = await apiRequest<{ listings: Product[] }>(`/crops${query ? `?search=${encodeURIComponent(query)}` : ''}`);
+      const result = await apiRequest<{ listings: Product[] }>(
+        `/crops${query ? `?search=${encodeURIComponent(query)}` : ''}`,
+        {},
+        session?.token,
+      );
       setProducts(result.listings || []);
     } catch (loadError) {
       setError(getApiError(loadError));

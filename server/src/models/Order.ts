@@ -60,6 +60,7 @@ export interface IOrder extends Document {
     transactionId?: string;
     paymentOrderId?: string;
     paidAt?: Date;
+    cashCollectedAt?: Date;
     expiresAt?: Date;
     receiptUrl?: string;
   };
@@ -70,6 +71,15 @@ export interface IOrder extends Document {
     pickupTime?: Date;
     dispatchedTime?: Date;
     deliveredTime?: Date;
+    assignmentHistory: Array<{
+      deliveryAgentId: Types.ObjectId;
+      deliveryAgentName: string;
+      assignedBy: Types.ObjectId;
+      assignedByName: string;
+      assignedAt: Date;
+      previousAgentId?: Types.ObjectId;
+      previousAgentName?: string;
+    }>;
     proofOfDelivery?: {
       otpVerified?: boolean;
       recipientSignature?: string;
@@ -155,6 +165,7 @@ const OrderSchema = new Schema<IOrder>(
       transactionId: String,
       paymentOrderId: String,
       paidAt: Date,
+      cashCollectedAt: Date,
       expiresAt: Date,
       receiptUrl: String,
     },
@@ -165,6 +176,15 @@ const OrderSchema = new Schema<IOrder>(
       pickupTime: Date,
       dispatchedTime: Date,
       deliveredTime: Date,
+      assignmentHistory: [{
+        deliveryAgentId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        deliveryAgentName: { type: String, required: true },
+        assignedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        assignedByName: { type: String, required: true },
+        assignedAt: { type: Date, default: Date.now },
+        previousAgentId: { type: Schema.Types.ObjectId, ref: 'User' },
+        previousAgentName: String,
+      }],
       proofOfDelivery: {
         otpVerified: Boolean,
         recipientSignature: String,

@@ -9,6 +9,13 @@ export interface ICropListing extends Document {
   category: (typeof CROP_CATEGORIES)[number];
   description: string;
   images: string[];
+  imageAssets: Array<{
+    url: string;
+    publicId: string;
+    contentType: string;
+    bytes: number;
+    uploadedAt: Date;
+  }>;
   qualityGrade: (typeof QUALITY_GRADES)[number];
   pricePerUnitPaise: number; // Stored in integer paise (e.g. ₹40.00 = 4000)
   unit: 'kg' | 'quintal' | 'box' | 'bunch' | 'crate';
@@ -45,6 +52,13 @@ const CropListingSchema = new Schema<ICropListing>(
     },
     description: { type: String, required: true },
     images: [{ type: String }],
+    imageAssets: [{
+      url: { type: String, required: true },
+      publicId: { type: String, required: true },
+      contentType: { type: String, required: true },
+      bytes: { type: Number, required: true },
+      uploadedAt: { type: Date, default: Date.now },
+    }],
     qualityGrade: {
       type: String,
       enum: QUALITY_GRADES,

@@ -91,6 +91,21 @@ cp server/.env.example server/.env
 Set `SEED_PASSWORD` in that local file before first startup if you want development seed accounts. Production never runs the seed script.
 For first production admin provisioning, register the operator as a customer and run `ADMIN_BOOTSTRAP_EMAIL=<existing-account-email> npm --prefix server run bootstrap:admin` once in a trusted environment with production `MONGODB_URI` and `JWT_SECRET` available.
 
+### Destructive production data reset
+
+This operation permanently deletes every document in the selected production database except the `User` record whose email is `akash@admin.com` and whose role is `admin`. It removes orders, crops, payments, payout ledgers, user accounts, audit logs, settings, and all other collection data. It does not drop collection indexes. Take and verify an Atlas backup first. Do not run this during normal deployment or unless the database name and retained admin account have been confirmed.
+
+Run from the Render backend service shell after confirming the backup and exact Atlas database name. The service environment must already provide `MONGODB_URI`; never paste or print the URI. Replace `<exact-database-name>` in both values with the database name from the MongoDB URI:
+
+```bash
+NODE_ENV=production \
+DATA_RESET_DATABASE_NAME='<exact-database-name>' \
+DATA_RESET_CONFIRMATION='DELETE_ALL_NON_ADMIN_DATA:<exact-database-name>:akash@admin.com' \
+npm --prefix server run reset:production-data
+```
+
+The command refuses to proceed if it is not in production mode, if the connected database name differs, if `akash@admin.com` is not an admin, or if the exact confirmation string is missing. It reports the number of records scheduled for deletion before acting and verifies the remaining database afterward. If this workspace has no production `MONGODB_URI`, the reset has not been run; use the Render shell with the service's configured environment after taking the backup.
+
 ### 3. Run Development Servers
 ```bash
 # Concurrently launch Express backend on port 5000 and Vite frontend on port 3000

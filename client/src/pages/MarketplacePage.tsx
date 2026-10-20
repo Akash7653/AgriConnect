@@ -1,16 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Search, ShoppingCart, Trash2, Minus, Plus, X, ShoppingBag, Loader2, CheckCircle2, Sparkles } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Minus, Plus, X, ShoppingBag, Loader2, CheckCircle2, Sparkles, Sprout } from 'lucide-react';
 import { ProductCard } from '@/components/marketplace/ProductCard';
 import { LocationSelector } from '@/components/marketplace/LocationSelector';
 import { ProductsService } from '@/services/products';
 import { useCart } from '@/hooks/useCart';
 import { useToast } from '@/hooks/useToast';
 import { useAuth } from '@/hooks/useAuth';
-import { PaymentService, playPaymentSuccessSound, type DeliveryAddress } from '@/services/payment';
+import { PaymentService, playPaymentSuccessSound, type CheckoutPaymentMethod, type DeliveryAddress } from '@/services/payment';
 import { subscribeRealtime } from '@/services/realtime';
-import type { CropProduct, ProductCategory } from '@/types';
+import type { CropProduct, ProductCategory, User } from '@/types';
 import { formatCurrency, classNames } from '@/utils';
 
 const categories: { value: ProductCategory | 'all'; label: string }[] = [
@@ -36,6 +36,8 @@ export function MarketplacePage() {
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [successOrder, setSuccessOrder] = useState('');
+  const [successPaymentMethod, setSuccessPaymentMethod] = useState<CheckoutPaymentMethod>('razorpay');
+  const checkoutIdempotencyKey = useRef<string | null>(null);
   const { session, isAuthenticated } = useAuth();
   const { showToast } = useToast();
   const location = useLocation();
@@ -46,12 +48,29 @@ export function MarketplacePage() {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, []);
 
-  async function startPayment(address: DeliveryAddress) {
+  async function startPayment(address: DeliveryAddress, paymentMethod: CheckoutPaymentMethod) {
     if (!session) return;
     setCheckoutBusy(true);
     setCheckoutError('');
     try {
-      const order = await PaymentService.createOrder(session, items, address);
+      checkoutIdempotencyKey.current ??= crypto.randomUUID();
+      const order = await PaymentService.createOrder(
+        session,
+        items,
+        address,
+        paymentMethod,
+        checkoutIdempotencyKey.current
+      );
+      checkoutIdempotencyKey.current = null;
+      if (order.paymentMethod === 'cod') {
+        clear();
+        setSuccessPaymentMethod('cod');
+        setCheckoutOpen(false);
+        setCartOpen(false);
+        setSuccessOrder(order.orderNumber);
+        showToast(`Order ${order.orderNumber} placed. Pay cash on delivery.`, 'success');
+        return;
+      }
       await PaymentService.openCheckout(
         order,
         session,
@@ -59,6 +78,7 @@ export function MarketplacePage() {
           clear();
           setCheckoutOpen(false);
           setCartOpen(false);
+          setSuccessPaymentMethod('razorpay');
           PaymentService.recordPayment({
             orderNumber,
             amount: amountPaise / 100,
@@ -86,23 +106,33 @@ export function MarketplacePage() {
   }
 
   useEffect(() => {
+    if (!session || !['buyer', 'business'].includes(session.user.role)) {
+      setProducts([]);
+      setLoading(false);
+      setError('The marketplace is available to buyer accounts.');
+      return;
+    }
     setLoading(true);
     setError('');
-    ProductsService.list({
+    ProductsService.list(session, {
       category: category === 'all' ? undefined : category,
       query: query || undefined,
+      state: session.user.address?.state,
+      district: session.user.address?.district,
     })
       .then(setProducts)
       .catch(() => setError('Could not load products. Please try again.'))
       .finally(() => setLoading(false));
-  }, [category, query]);
+  }, [category, query, session]);
 
   useEffect(() => {
     if (!session) return;
     return subscribeRealtime(session.token, () => {
-      ProductsService.list({
+      ProductsService.list(session, {
         category: category === 'all' ? undefined : category,
         query: query || undefined,
+        state: session.user.address?.state,
+        district: session.user.address?.district,
       }).then(setProducts).catch(() => setError('Live inventory refresh failed.'));
     });
   }, [category, query, session]);
@@ -218,6 +248,7 @@ export function MarketplacePage() {
         checkoutOpen={checkoutOpen}
         checkoutBusy={checkoutBusy}
         checkoutError={checkoutError}
+        profile={session?.user}
         onCheckout={() => {
           if (!isAuthenticated) {
             navigate(`/login?redirect=${encodeURIComponent(location.pathname)}`);
@@ -253,9 +284,14 @@ export function MarketplacePage() {
                 <CheckCircle2 className="h-9 w-9" strokeWidth={1.7} />
               </motion.div>
               <Sparkles className="absolute right-10 top-8 h-5 w-5 text-agri-emerald" />
-              <h2 className="mt-5 font-display text-3xl text-forest">Payment confirmed</h2>
+              <h2 className="mt-5 font-display text-3xl text-forest">
+                {successPaymentMethod === 'cod' ? 'Order placed' : 'Payment confirmed'}
+              </h2>
               <p className="mt-2 text-sm text-charcoal/65">
-                Order <span className="font-semibold text-forest">{successOrder}</span> is now being prepared.
+                Order <span className="font-semibold text-forest">{successOrder}</span>{' '}
+                {successPaymentMethod === 'cod'
+                  ? 'is confirmed. Pay the order total in cash when it is delivered.'
+                  : 'is now being prepared.'}
               </p>
               <button
                 onClick={() => setSuccessOrder('')}
@@ -283,8 +319,9 @@ interface CartDrawerProps {
   checkoutOpen: boolean;
   checkoutBusy: boolean;
   checkoutError: string;
+  profile?: User;
   onCheckout: () => void;
-  onPay: (address: DeliveryAddress) => void;
+  onPay: (address: DeliveryAddress, paymentMethod: CheckoutPaymentMethod) => void;
   onBackToCart: () => void;
 }
 
@@ -300,29 +337,69 @@ function CartDrawer({
   checkoutOpen,
   checkoutBusy,
   checkoutError,
+  profile,
   onCheckout,
   onPay,
   onBackToCart,
 }: CartDrawerProps) {
   const deliveryFee = totalAmount >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
   const payableAmount = totalAmount + deliveryFee;
-  const [address, setAddress] = useState<DeliveryAddress>({
-    recipientName: '',
-    phone: '',
-    addressLine1: '',
-    city: '',
-    district: '',
-    state: '',
-    pinCode: '',
-  });
+  const [address, setAddress] = useState<DeliveryAddress>(() => ({
+    recipientName: profile?.fullName ?? '',
+    phone: profile?.phone ?? '',
+    addressLine1: profile?.address?.street ?? '',
+    city: profile?.address?.villageOrCity ?? '',
+    district: profile?.address?.district ?? '',
+    state: profile?.address?.state ?? '',
+    pinCode: profile?.address?.pinCode ?? '',
+  }));
+  const editedFields = useRef(new Set<keyof DeliveryAddress>());
+  const profileId = useRef(profile?.id);
+  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('razorpay');
+
+  useEffect(() => {
+    if (profileId.current === profile?.id) return;
+    profileId.current = profile?.id;
+    editedFields.current.clear();
+    setAddress({
+      recipientName: profile?.fullName ?? '',
+      phone: profile?.phone ?? '',
+      addressLine1: profile?.address?.street ?? '',
+      city: profile?.address?.villageOrCity ?? '',
+      district: profile?.address?.district ?? '',
+      state: profile?.address?.state ?? '',
+      pinCode: profile?.address?.pinCode ?? '',
+    });
+  }, [profile]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const savedAddress: Partial<DeliveryAddress> = {
+      recipientName: profile.fullName,
+      phone: profile.phone,
+      addressLine1: profile.address?.street,
+      city: profile.address?.villageOrCity,
+      district: profile.address?.district,
+      state: profile.address?.state,
+      pinCode: profile.address?.pinCode,
+    };
+    setAddress((current) => {
+      const next = { ...current };
+      for (const [field, value] of Object.entries(savedAddress) as [keyof DeliveryAddress, string | undefined][]) {
+        if (value && !editedFields.current.has(field)) next[field] = value;
+      }
+      return next;
+    });
+  }, [profile]);
 
   function updateAddress(field: keyof DeliveryAddress, value: string) {
+    editedFields.current.add(field);
     setAddress((current) => ({ ...current, [field]: value }));
   }
 
   function submitPayment(event: React.FormEvent) {
     event.preventDefault();
-    onPay(address);
+    onPay(address, paymentMethod);
   }
 
   return (
@@ -363,13 +440,22 @@ function CartDrawer({
                 </div>
                 <LocationSelector
                   onResolved={(resolved) =>
-                    setAddress((current) => ({
-                      ...current,
-                      city: resolved.city,
-                      district: resolved.district,
-                      state: resolved.state,
-                      pinCode: resolved.pinCode,
-                    }))
+                    setAddress((current) => {
+                      const suggestion: DeliveryAddress = {
+                        recipientName: profile?.fullName ?? '',
+                        phone: profile?.phone ?? '',
+                        addressLine1: resolved.displayName,
+                        city: resolved.city,
+                        district: resolved.district,
+                        state: resolved.state,
+                        pinCode: resolved.pinCode,
+                      };
+                      const next = { ...current };
+                      for (const [field, value] of Object.entries(suggestion) as [keyof DeliveryAddress, string][]) {
+                        if (value && !editedFields.current.has(field)) next[field] = value;
+                      }
+                      return next;
+                    })
                   }
                 />
                 <div className="grid grid-cols-2 gap-3">
@@ -393,6 +479,31 @@ function CartDrawer({
                     </label>
                   ))}
                 </div>
+                <fieldset className="space-y-2 rounded-xl border border-forest/10 bg-white/60 p-3">
+                  <legend className="px-1 text-xs font-semibold text-charcoal/70">Payment method</legend>
+                  <label className="flex cursor-pointer items-start gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="checkout-payment-method"
+                      value="razorpay"
+                      checked={paymentMethod === 'razorpay'}
+                      onChange={() => setPaymentMethod('razorpay')}
+                      className="mt-1 accent-agri-green"
+                    />
+                    <span><strong className="text-forest">Pay online</strong><span className="block text-xs text-charcoal/60">Secure checkout with Razorpay</span></span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="checkout-payment-method"
+                      value="cod"
+                      checked={paymentMethod === 'cod'}
+                      onChange={() => setPaymentMethod('cod')}
+                      className="mt-1 accent-agri-green"
+                    />
+                    <span><strong className="text-forest">Cash on delivery</strong><span className="block text-xs text-charcoal/60">Pay in cash when your order arrives</span></span>
+                  </label>
+                </fieldset>
                 {checkoutError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{checkoutError}</p>}
                 <div className="space-y-2 rounded-xl bg-white/70 p-4 text-sm">
                   <div className="flex justify-between text-charcoal/60">
@@ -411,7 +522,9 @@ function CartDrawer({
                   className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-agri-emerald py-3.5 font-semibold text-forest hover:bg-forest hover:text-ivory disabled:opacity-50 transition-colors"
                 >
                   {checkoutBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {checkoutBusy ? 'Preparing secure checkout…' : `Pay ${formatCurrency(payableAmount)}`}
+                  {checkoutBusy
+                    ? paymentMethod === 'cod' ? 'Placing order…' : 'Preparing secure checkout…'
+                    : paymentMethod === 'cod' ? `Place order · ${formatCurrency(payableAmount)}` : `Pay ${formatCurrency(payableAmount)}`}
                 </button>
               </form>
             ) : items.length === 0 ? (
@@ -425,11 +538,11 @@ function CartDrawer({
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
                   {items.map((item) => (
                     <div key={item.productId} className="flex gap-3">
-                      <img
-                        src={item.imageUrl}
-                        alt={item.name}
-                        className="h-16 w-16 rounded-xl object-cover"
-                      />
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt={item.name} className="h-16 w-16 rounded-xl object-cover" />
+                      ) : (
+                        <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-forest/5 text-agri-green"><Sprout className="h-6 w-6" aria-hidden="true" /></div>
+                      )}
                       <div className="flex-1">
                         <p className="font-medium text-forest">{item.name}</p>
                         <p className="text-sm text-charcoal/60">

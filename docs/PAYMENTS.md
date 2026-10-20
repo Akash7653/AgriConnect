@@ -16,6 +16,8 @@ The webhook endpoint is `POST /api/payment/webhook` (for the current Render depl
 
 The current seller payout model is an internal ledger. Razorpay does not automatically split marketplace funds between farmers.
 
+Cash on delivery creates a confirmed order with payment still pending and does not call Razorpay. The assigned delivery partner must confirm cash collection when recording proof of delivery; only then is the order payment marked captured. COD farmer ledger entries are held for manual settlement and are not sent through Razorpay Route, because COD has no Razorpay payment source.
+
 Admin refunds are limited to captured, unfulfilled orders. Refund state is reported as successful only after Razorpay reports `processed`; pending provider refunds are reconciled from webhooks. Refunds restore reserved inventory transactionally and append negative ledger adjustments without rewriting sale entries.
 
 ## Automated farmer payouts (Razorpay Route)

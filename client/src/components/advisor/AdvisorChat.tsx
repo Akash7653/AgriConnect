@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Loader2, MessageCircle, Send, Sprout, X } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { askAdvisor, type AdvisorLanguage } from '@/services/advisor';
 
 interface Message {
@@ -36,14 +37,17 @@ const copy: Record<AdvisorLanguage, { title: string; welcome: string; placeholde
 };
 
 export function AdvisorChat() {
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const [language, setLanguage] = useState<AdvisorLanguage>('en');
   const [messages, setMessages] = useState<Message[]>([{ id: 0, role: 'assistant', text: copy.en.welcome }]);
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [failedQuestion, setFailedQuestion] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const labels = copy[language];
+  const mobileOffset = location.pathname.startsWith('/dashboard/marketplace') ? 'bottom-40' : 'bottom-24';
 
   useEffect(() => {
     if (messages.length === 1) {
@@ -61,21 +65,29 @@ export function AdvisorChat() {
     if (!question || busy) return;
 
     setPrompt('');
-    setError('');
     setMessages((current) => [...current, { id: Date.now(), role: 'user', text: question }]);
+    await sendQuestion(question);
+  }
+
+  async function sendQuestion(question: string) {
+    setError('');
     setBusy(true);
     try {
       const result = await askAdvisor(question, language);
       setMessages((current) => [...current, { id: Date.now() + 1, role: 'assistant', text: result.response }]);
+      setFailedQuestion('');
+      setPrompt((current) => current === question ? '' : current);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Could not reach the assistant. Please try again.');
+      setFailedQuestion(question);
+      setPrompt(question);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-[60] sm:bottom-6 sm:right-6">
+    <div className={`fixed ${mobileOffset} right-4 z-[60] sm:bottom-6 sm:right-6`}>
       {open && (
         <section
           aria-label={labels.title}
@@ -126,7 +138,19 @@ export function AdvisorChat() {
                 Thinking…
               </p>
             )}
-            {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+            {error && (
+              <div role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+                <p>{error}</p>
+                <button
+                  type="button"
+                  disabled={busy || !failedQuestion}
+                  onClick={() => void sendQuestion(failedQuestion)}
+                  className="mt-2 font-semibold underline disabled:opacity-50"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
           </div>
 
           <form onSubmit={submit} className="flex items-end gap-2 border-t border-forest/10 bg-white p-3">

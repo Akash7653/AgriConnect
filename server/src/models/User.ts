@@ -6,6 +6,14 @@ export interface IUser extends Document {
   email: string;
   passwordHash: string;
   role: UserRole;
+  requestedRole?: Exclude<UserRole, 'admin'>;
+  requestedFarm?: {
+    farmName: string;
+    village: string;
+    district: string;
+    state: string;
+    pinCode: string;
+  };
   phone: string;
   language: 'en' | 'te' | 'hi';
   isVerified: boolean;
@@ -32,6 +40,17 @@ const UserSchema = new Schema<IUser>(
       enum: Object.values(USER_ROLES),
       required: true,
       default: USER_ROLES.BUYER,
+    },
+    requestedRole: {
+      type: String,
+      enum: ['farmer', 'buyer', 'business', 'logistics'],
+    },
+    requestedFarm: {
+      farmName: { type: String, trim: true },
+      village: { type: String, trim: true },
+      district: { type: String, trim: true },
+      state: { type: String, trim: true },
+      pinCode: { type: String, trim: true },
     },
     phone: { type: String, required: true, trim: true },
     language: { type: String, enum: ['en', 'te', 'hi'], default: 'en' },

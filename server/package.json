@@ -9,6 +9,7 @@
     "dev": "tsx watch src/index.ts",
     "seed": "tsx src/scripts/seed.ts",
     "bootstrap:admin": "tsx src/scripts/bootstrapAdmin.ts",
+    "reset:production-data": "tsx src/scripts/resetProductionData.ts",
     "init:atlas": "tsx src/scripts/initAtlasCollections.ts",
     "test": "vitest run --no-file-parallelism --maxWorkers=1"
   },

@@ -1,10 +1,26 @@
-export type UserRole = 'farmer' | 'buyer' | 'logistics' | 'admin';
+export type UserRole = 'farmer' | 'buyer' | 'business' | 'logistics' | 'admin';
 
 export interface User {
   id: string;
   email: string;
   fullName: string;
+  phone?: string;
   role: UserRole;
+  requestedRole?: Exclude<UserRole, 'admin'>;
+  requestedFarm?: {
+    farmName: string;
+    village: string;
+    district: string;
+    state: string;
+    pinCode: string;
+  };
+  address?: {
+    street?: string;
+    villageOrCity?: string;
+    district?: string;
+    state?: string;
+    pinCode?: string;
+  };
 }
 
 export interface AuthSession {
@@ -25,6 +41,8 @@ export interface CropProduct {
   imageUrl: string;
   harvestDate: string;
   isOrganic: boolean;
+  description: string;
+  minOrderQuantity: number;
 }
 
 export type ProductCategory =
