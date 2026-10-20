@@ -24,6 +24,7 @@ interface AuthContextValue {
     };
   }) => Promise<void>;
   signOut: () => void;
+  updateAddress: (address: User['address']) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -121,6 +122,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut() {
         AuthService.clearSession();
         setSession(null);
+      },
+      async updateAddress(address) {
+        if (!session) throw new Error('Sign in to save your delivery address.');
+        await request('/auth/profile', {
+          method: 'PUT',
+          token: session.token,
+          body: JSON.stringify({ address }),
+        });
+        const updatedSession = { ...session, user: { ...session.user, address } };
+        AuthService.persistSession(updatedSession);
+        setSession(updatedSession);
       },
     }),
     [session]

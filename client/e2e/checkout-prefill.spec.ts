@@ -54,6 +54,16 @@ test('location fills checkout delivery fields and offers cash on delivery', asyn
         },
       }),
     }));
+    await context.route(`${apiOrigin}/api/serviceability**`, (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        configured: true,
+        serviceable: true,
+        zone: { estimatedDeliveryDays: 2 },
+      }),
+    }));
 
     const page = await context.newPage();
     await page.goto('/dashboard/marketplace');
@@ -70,9 +80,10 @@ test('location fills checkout delivery fields and offers cash on delivery', asyn
     await expect(page.getByLabel('District')).toHaveValue('Pune');
     await expect(page.getByLabel('State')).toHaveValue('Maharashtra');
     await expect(page.getByLabel('PIN code')).toHaveValue('411001');
+    await expect(page.getByText('Estimated delivery within 2 days after order confirmation. Timing may vary.')).toBeVisible();
 
     await page.getByRole('radio', { name: /Cash on delivery/ }).check();
-    await expect(page.getByRole('button', { name: /Place order/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Place cash-on-delivery order' })).toBeVisible();
   } finally {
     await context.close();
   }

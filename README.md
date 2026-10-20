@@ -116,6 +116,63 @@ npm run dev
 - **Backend API**: [http://localhost:5000/api](http://localhost:5000/api)
 - **Interactive Swagger Docs**: [http://localhost:5000/api-docs](http://localhost:5000/api-docs)
 
+### Storefront campaigns and delivery estimates
+
+The mobile storefront has a swipeable campaign carousel backed by the public
+`GET /api/storefront/campaigns` endpoint. Configure up to 10 campaigns in the
+backend's `STOREFRONT_CAMPAIGNS_JSON` environment variable. Use valid, approved
+campaign copy and HTTPS-hosted imagery; omit expired campaigns or set their
+`startsAt` / `endsAt` timestamps in ISO 8601 format. The API filters campaigns
+outside their configured date range. The storefront only displays a campaign
+when its category has current catalogue listings. If no active campaigns are
+configured, it shows a carousel built from real available listings instead.
+
+Example Render backend environment value:
+
+```json
+[
+  {
+    "id": "vegetable-feature",
+    "title": "Explore this week's vegetables",
+    "description": "Browse current vegetables listed by AgriConnect farmers.",
+    "imageUrl": "https://cdn.example.com/campaigns/vegetables.webp",
+    "category": "vegetables",
+    "ctaLabel": "Browse vegetables",
+    "startsAt": "2026-10-01T00:00:00.000Z",
+    "endsAt": "2026-11-01T00:00:00.000Z"
+  }
+]
+```
+
+The supported category values are `vegetables`, `fruits`, `grains`, `pulses`,
+`spices`, `herbs`, `dairy`, and `organic-special`. Invalid campaign JSON or
+fields cause the campaigns endpoint to return an error rather than silently
+displaying malformed content. Campaign copy is operator-configured; do not
+claim a discount, stock level, seller endorsement, or delivery promise unless
+the corresponding information is verified.
+
+Delivery estimates are configured per service zone using the existing
+administrator API. Include `estimatedDeliveryDays` (an integer from 1 to 30)
+when creating or updating a zone, for example:
+
+```json
+{
+  "name": "Hyderabad Central",
+  "city": "Hyderabad",
+  "state": "Telangana",
+  "postalCodes": ["500081"],
+  "active": true,
+  "estimatedDeliveryDays": 2,
+  "fulfilmentMethods": ["supplier_delivery"]
+}
+```
+
+The public `GET /api/serviceability?city=...&state=...&pinCode=...` response
+includes the estimate only for a matching active zone. The storefront and
+checkout describe it as an estimate after order confirmation, not a guarantee.
+If a zone has no estimate configured, no delivery time is promised. Service
+zone availability and order creation continue to be verified by the backend.
+
 ---
 
 ## 6. Razorpay Payment Integration
@@ -135,6 +192,56 @@ RAZORPAY_KEY_ID=your_live_key_id
 RAZORPAY_KEY_SECRET=your_live_key_secret
 RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
 ```
+
+### Enable live payments on Render
+
+Live payments can charge real customers. Keep local development on Razorpay Test
+Mode and change only the production backend after confirming the Razorpay live
+account, website checkout, order fulfilment, refund process, and support
+contacts are ready.
+
+1. In the Razorpay Dashboard, switch to **Live Mode** and copy the Live Key ID
+   and Key Secret. Live Key IDs start with `rzp_live_`. Never use Test Mode
+   credentials for this deployment.
+2. In the Render dashboard, open the production backend service's **Environment**
+   settings. Set:
+
+   ```env
+   NODE_ENV=production
+   RAZORPAY_KEY_ID=rzp_live_<your_live_key_id>
+   RAZORPAY_KEY_SECRET=<your_live_key_secret>
+   RAZORPAY_WEBHOOK_SECRET=<the_live_webhook_secret_configured_below>
+   ```
+
+   Add the real values directly in Render's secret environment-variable form;
+   do not commit them, put them in Vite/`VITE_*` variables, paste them into
+   source files, or share them in chat. `RAZORPAY_KEY_ID` is sent by the
+   backend to Razorpay Checkout as its public identifier; the Key Secret and
+   Webhook Secret must remain backend-only.
+3. In the Razorpay Dashboard, still in **Live Mode**, configure the webhook
+   URL as `https://<your-production-api-host>/api/payment/webhook`. Generate a
+   dedicated webhook secret, enter that exact secret as
+   `RAZORPAY_WEBHOOK_SECRET` in Render, and enable the payment events used by
+   the application (`payment.captured`, `payment.failed`, and `order.paid`).
+   Test-mode and live-mode webhook secrets are different.
+4. Save the Render environment changes and allow the production service to
+   redeploy/restart. The backend initializes its Razorpay client from these
+   variables at runtime. In `NODE_ENV=production`, payment operations refuse
+   a key ID that does not begin with `rzp_live_`.
+5. Confirm the Render deployment is healthy, then place one low-value,
+   authorized real order and verify its captured status and webhook
+   reconciliation in the Razorpay Dashboard and AgriConnect order record.
+   Verify the refund workflow with an appropriate real refund before promoting
+   broader traffic. Refunds reverse real money and should be performed only
+   with authorization.
+
+The app does not need the Key Secret or Webhook Secret in Vercel. Do not switch
+the frontend to a live key manually: it receives the Checkout Key ID from the
+backend when an order is created. To return production to Test Mode, first
+disable real checkout, replace the backend credentials with the matching Test
+credentials only in a non-production environment, and do not set production
+`NODE_ENV` with Test credentials—the server intentionally rejects that
+combination.
 
 ### Payment Lifecycle & Concurrency Protection
 1. **Pay Now & Order Creation (`POST /api/payment/create-order`)**:

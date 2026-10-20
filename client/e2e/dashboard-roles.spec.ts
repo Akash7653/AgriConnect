@@ -45,7 +45,7 @@ test('farmer listing page uses saved farm location and does not expose the buyer
   }
 });
 
-test('buyer sees marketplace once in the mobile bar and not again in its overflow menu', async ({ browser }) => {
+test('buyer has category and search tabs in the mobile bar without farmer-specific navigation', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
   try {
     await addSession(context, 'buyer');
@@ -58,10 +58,11 @@ test('buyer sees marketplace once in the mobile bar and not again in its overflo
     const page = await context.newPage();
     await page.goto('/dashboard/marketplace');
     const mobileNav = page.locator('nav.fixed.bottom-0');
-    await expect(mobileNav.getByRole('link', { name: 'Marketplace' })).toHaveCount(1);
-    await mobileNav.getByRole('button', { name: 'More' }).click();
-    const overflow = mobileNav.locator('div.absolute');
-    await expect(overflow.getByRole('link', { name: 'Marketplace' })).toHaveCount(0);
+    await expect(mobileNav.getByRole('link', { name: 'Categories' })).toHaveCount(1);
+    await expect(mobileNav.getByRole('link', { name: 'Search' })).toHaveCount(1);
+    await expect(mobileNav.getByRole('link', { name: 'Orders' })).toHaveCount(1);
+    await expect(mobileNav.getByRole('link', { name: 'Marketplace' })).toHaveCount(0);
+    await expect(mobileNav.getByRole('link', { name: 'Crop Listings' })).toHaveCount(0);
   } finally {
     await context.close();
   }
@@ -119,7 +120,7 @@ test('role-based registration requests approval without granting farmer access',
       const session = JSON.parse(localStorage.getItem('agriconnect_session') ?? '{}');
       return [session.user.role, session.user.requestedRole];
     })).toEqual(['buyer', 'farmer']);
-    await expect(page.locator('nav.fixed.bottom-0').getByRole('link', { name: 'Marketplace' })).toHaveCount(1);
+    await expect(page.locator('nav.fixed.bottom-0').getByRole('link', { name: 'Categories' })).toHaveCount(1);
     await expect(page.locator('nav.fixed.bottom-0').getByRole('link', { name: 'Crop Listings' })).toHaveCount(0);
   } finally {
     await context.close();

@@ -286,6 +286,7 @@ const serviceZoneSchema = z.object({
   active: z.boolean().default(true),
   deliveryFeePaise: z.number().int().min(0).optional(),
   freeDeliveryThresholdPaise: z.number().int().min(0).optional(),
+  estimatedDeliveryDays: z.number().int().min(1).max(30).optional(),
   fulfilmentMethods: z
     .array(z.enum(['supplier_delivery', 'third_party_delivery', 'customer_pickup', 'platform_hub']))
     .min(1)

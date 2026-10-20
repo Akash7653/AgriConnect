@@ -8,6 +8,7 @@ export interface IServiceZone extends Document {
   active: boolean;
   deliveryFeePaise?: number;
   freeDeliveryThresholdPaise?: number;
+  estimatedDeliveryDays?: number;
   fulfilmentMethods: Array<'supplier_delivery' | 'third_party_delivery' | 'customer_pickup' | 'platform_hub'>;
   createdAt: Date;
   updatedAt: Date;
@@ -22,6 +23,7 @@ const ServiceZoneSchema = new Schema<IServiceZone>(
     active: { type: Boolean, default: true, index: true },
     deliveryFeePaise: { type: Number, min: 0 },
     freeDeliveryThresholdPaise: { type: Number, min: 0 },
+    estimatedDeliveryDays: { type: Number, min: 1, max: 30 },
     fulfilmentMethods: {
       type: [String],
       enum: ['supplier_delivery', 'third_party_delivery', 'customer_pickup', 'platform_hub'],

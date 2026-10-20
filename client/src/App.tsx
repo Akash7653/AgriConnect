@@ -18,7 +18,9 @@ function AppRoutes() {
 
   useEffect(() => {
     if (isLanding) {
-      setShowIntro(true);
+      setShowIntro(!window.matchMedia('(max-width: 1023px)').matches);
+    } else {
+      setShowIntro(false);
     }
   }, [isLanding]);
 

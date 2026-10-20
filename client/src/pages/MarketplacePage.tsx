@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, ShoppingCart, Trash2, Minus, Plus, X, ShoppingBag, Loader2, CheckCircle2, Sparkles, Sprout } from 'lucide-react';
 import { ProductCard } from '@/components/marketplace/ProductCard';
 import { LocationSelector } from '@/components/marketplace/LocationSelector';
@@ -8,6 +8,7 @@ import { ProductsService } from '@/services/products';
 import { useCart } from '@/hooks/useCart';
 import { useToast } from '@/hooks/useToast';
 import { useAuth } from '@/hooks/useAuth';
+import { request } from '@/services/api';
 import { PaymentService, playPaymentSuccessSound, type CheckoutPaymentMethod, type DeliveryAddress } from '@/services/payment';
 import { subscribeRealtime } from '@/services/realtime';
 import type { CropProduct, ProductCategory, User } from '@/types';
@@ -17,25 +18,42 @@ const categories: { value: ProductCategory | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'vegetables', label: 'Vegetables' },
   { value: 'fruits', label: 'Fruits' },
-  { value: 'grains', label: 'Grains' },
+  { value: 'grains', label: 'Grains & cereals' },
   { value: 'pulses', label: 'Pulses' },
-  { value: 'herbs', label: 'Herbs' },
+  { value: 'spices', label: 'Spices' },
+  { value: 'herbs', label: 'Greens & herbs' },
+  { value: 'dairy', label: 'Dairy' },
+  { value: 'organic-special', label: 'Organic Special' },
 ];
 
-const DELIVERY_FEE = 40;
-const FREE_DELIVERY_THRESHOLD = 500;
+const categoryBySlug: Partial<Record<string, ProductCategory>> = {
+  vegetables: 'vegetables',
+  fruits: 'fruits',
+  grains: 'grains',
+  pulses: 'pulses',
+  spices: 'spices',
+  herbs: 'herbs',
+  dairy: 'dairy',
+  'organic-special': 'organic-special',
+};
 
 export function MarketplacePage() {
   const [products, setProducts] = useState<CropProduct[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [category, setCategory] = useState<ProductCategory | 'all'>('all');
-  const [query, setQuery] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const categoryParam = searchParams.get('category') ?? '';
+  const category: ProductCategory | 'all' = categoryBySlug[categoryParam] ?? 'all';
+  const query = searchParams.get('search') ?? '';
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+  const [retryCount, setRetryCount] = useState(0);
+  const [catalogueCategories, setCatalogueCategories] = useState<Set<ProductCategory>>(new Set());
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [successOrder, setSuccessOrder] = useState('');
+  const [successAmountPaise, setSuccessAmountPaise] = useState<number | null>(null);
   const [successPaymentMethod, setSuccessPaymentMethod] = useState<CheckoutPaymentMethod>('razorpay');
   const checkoutIdempotencyKey = useRef<string | null>(null);
   const { session, isAuthenticated } = useAuth();
@@ -43,10 +61,32 @@ export function MarketplacePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { items, totalItems, totalAmount, remove, setQuantity, clear } = useCart();
+  const availableCategories = categories.filter((entry) =>
+    entry.value === 'all' || catalogueCategories.has(entry.value)
+  );
+
+  function updateSearch(search: string) {
+    const next = new URLSearchParams(searchParams);
+    if (search) next.set('search', search);
+    else next.delete('search');
+    setSearchParams(next, { replace: true });
+  }
+
+  function updateCategory(value: ProductCategory | 'all') {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'all') next.delete('category');
+    else next.set('category', value);
+    setSearchParams(next, { replace: true });
+  }
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedQuery(query), 250);
+    return () => window.clearTimeout(timeout);
+  }, [query]);
 
   async function startPayment(address: DeliveryAddress, paymentMethod: CheckoutPaymentMethod) {
     if (!session) return;
@@ -65,6 +105,7 @@ export function MarketplacePage() {
       if (order.paymentMethod === 'cod') {
         clear();
         setSuccessPaymentMethod('cod');
+        setSuccessAmountPaise(order.amountPaise);
         setCheckoutOpen(false);
         setCartOpen(false);
         setSuccessOrder(order.orderNumber);
@@ -79,6 +120,7 @@ export function MarketplacePage() {
           setCheckoutOpen(false);
           setCartOpen(false);
           setSuccessPaymentMethod('razorpay');
+          setSuccessAmountPaise(amountPaise);
           PaymentService.recordPayment({
             orderNumber,
             amount: amountPaise / 100,
@@ -116,26 +158,52 @@ export function MarketplacePage() {
     setError('');
     ProductsService.list(session, {
       category: category === 'all' ? undefined : category,
-      query: query || undefined,
+      query: debouncedQuery || undefined,
       state: session.user.address?.state,
       district: session.user.address?.district,
+      limit: 100,
     })
       .then(setProducts)
-      .catch(() => setError('Could not load products. Please try again.'))
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : 'Could not load products. Please try again.'))
       .finally(() => setLoading(false));
-  }, [category, query, session]);
+  }, [category, debouncedQuery, retryCount, session]);
+
+  useEffect(() => {
+    if (!session || !['buyer', 'business'].includes(session.user.role)) return;
+    let active = true;
+    ProductsService.list(session, {
+      state: session.user.address?.state,
+      district: session.user.address?.district,
+      limit: 100,
+    }).then((catalogue) => {
+      if (active) setCatalogueCategories(new Set(catalogue.map((product) => product.category)));
+    }).catch(() => {
+      if (active) setCatalogueCategories(new Set());
+    });
+    return () => { active = false; };
+  }, [session]);
+
+  useEffect(() => {
+    if (location.hash === '#cart') setCartOpen(true);
+    if (location.hash === '#product-search') {
+      document.getElementById('product-search')?.focus();
+    }
+    if (location.hash === '#categories') {
+      document.getElementById('categories')?.scrollIntoView({ block: 'start' });
+    }
+  }, [location.hash]);
 
   useEffect(() => {
     if (!session) return;
     return subscribeRealtime(session.token, () => {
       ProductsService.list(session, {
         category: category === 'all' ? undefined : category,
-        query: query || undefined,
+        query: debouncedQuery || undefined,
         state: session.user.address?.state,
         district: session.user.address?.district,
       }).then(setProducts).catch(() => setError('Live inventory refresh failed.'));
     });
-  }, [category, query, session]);
+  }, [category, debouncedQuery, session]);
 
   return (
     <div className="min-w-0 max-w-full overflow-hidden bg-ivory">
@@ -166,21 +234,24 @@ export function MarketplacePage() {
             </button>
           </div>
 
-          <div className="flex flex-col lg:flex-row gap-4 mb-8">
-            <div className="relative flex-1">
+          <div className="sticky top-[68px] z-10 -mx-4 mb-5 bg-ivory/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:px-0 sm:py-0 lg:mb-8 lg:flex lg:flex-row lg:gap-4">
+            <div className="relative flex-1 scroll-mt-28">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-charcoal/40" />
               <input
+                id="product-search"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => updateSearch(e.target.value)}
                 placeholder="Search crops, farmers, regions…"
+                aria-label="Search crops, farmers, or regions"
                 className="w-full rounded-full border border-forest/15 bg-white/60 pl-11 pr-4 py-3 text-forest placeholder:text-charcoal/40 focus:outline-none focus:ring-2 focus:ring-agri-emerald"
               />
+              {query && <button type="button" onClick={() => updateSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-2 text-charcoal/50 hover:bg-forest/5"><X className="h-4 w-4" /></button>}
             </div>
-            <div className="flex min-w-0 max-w-full flex-wrap gap-2 pb-1">
-              {categories.map((c) => (
+            <div id="categories" className="mt-3 flex min-w-0 max-w-full scroll-mt-28 gap-2 overflow-x-auto pb-1 lg:mt-0 lg:flex-wrap">
+              {availableCategories.map((c) => (
                 <button
                   key={c.value}
-                  onClick={() => setCategory(c.value)}
+                  onClick={() => updateCategory(c.value)}
                   className={classNames(
                     'px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors',
                     category === c.value
@@ -201,7 +272,8 @@ export function MarketplacePage() {
           )}
           {error && !loading && (
             <div className="py-16 text-center">
-              <p className="text-red-500">{error}</p>
+              <p role="alert" className="text-red-700">{error}</p>
+              <button type="button" onClick={() => setRetryCount((count) => count + 1)} className="mt-3 min-h-10 rounded-xl border border-forest/15 px-4 text-sm font-semibold text-forest">Retry</button>
             </div>
           )}
           {!loading && !error && products && products.length === 0 && (
@@ -293,6 +365,7 @@ export function MarketplacePage() {
                   ? 'is confirmed. Pay the order total in cash when it is delivered.'
                   : 'is now being prepared.'}
               </p>
+              {successAmountPaise !== null && <p className="mt-3 text-sm font-semibold text-forest">Server-confirmed total: {formatCurrency(successAmountPaise / 100)}</p>}
               <button
                 onClick={() => setSuccessOrder('')}
                 className="mt-7 rounded-full bg-forest px-6 py-3 text-sm font-semibold text-ivory transition-colors hover:bg-agri-emerald hover:text-forest"
@@ -342,8 +415,6 @@ function CartDrawer({
   onPay,
   onBackToCart,
 }: CartDrawerProps) {
-  const deliveryFee = totalAmount >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
-  const payableAmount = totalAmount + deliveryFee;
   const [address, setAddress] = useState<DeliveryAddress>(() => ({
     recipientName: profile?.fullName ?? '',
     phone: profile?.phone ?? '',
@@ -356,6 +427,7 @@ function CartDrawer({
   const editedFields = useRef(new Set<keyof DeliveryAddress>());
   const profileId = useRef(profile?.id);
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('razorpay');
+  const [deliveryEstimate, setDeliveryEstimate] = useState('');
 
   useEffect(() => {
     if (profileId.current === profile?.id) return;
@@ -392,6 +464,46 @@ function CartDrawer({
     });
   }, [profile]);
 
+  useEffect(() => {
+    let active = true;
+    if (!checkoutOpen || address.city.trim().length < 2 || address.state.trim().length < 2 || address.pinCode.trim().length < 5) {
+      setDeliveryEstimate('');
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      const params = new URLSearchParams({
+        city: address.city.trim(),
+        state: address.state.trim(),
+        pinCode: address.pinCode.trim(),
+      });
+      request<{
+        configured: boolean;
+        serviceable: boolean;
+        zone?: { estimatedDeliveryDays?: number };
+      }>(`/serviceability?${params}`)
+        .then((result) => {
+          if (!active) return;
+          if (!result.configured) {
+            setDeliveryEstimate('Delivery timing is not configured for this location.');
+          } else if (!result.serviceable) {
+            setDeliveryEstimate('Delivery is not currently available for this PIN code.');
+          } else if (result.zone?.estimatedDeliveryDays) {
+            const days = result.zone.estimatedDeliveryDays;
+            setDeliveryEstimate(`Estimated delivery within ${days} ${days === 1 ? 'day' : 'days'} after order confirmation. Timing may vary.`);
+          } else {
+            setDeliveryEstimate('Delivery is available, but an estimated delivery time is not configured.');
+          }
+        })
+        .catch(() => {
+          if (active) setDeliveryEstimate('Could not check the delivery estimate. Availability will be confirmed when the order is placed.');
+        });
+    }, 350);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [address.city, address.state, address.pinCode, checkoutOpen]);
+
   function updateAddress(field: keyof DeliveryAddress, value: string) {
     editedFields.current.add(field);
     setAddress((current) => ({ ...current, [field]: value }));
@@ -414,7 +526,7 @@ function CartDrawer({
             onClick={onClose}
           />
           <motion.aside
-            className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-ivory z-[71] flex flex-col"
+            className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-ivory z-[71] flex flex-col pb-[env(safe-area-inset-bottom)]"
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
@@ -458,6 +570,7 @@ function CartDrawer({
                     })
                   }
                 />
+                {deliveryEstimate && <p role="status" className="rounded-lg bg-agri-emerald/10 px-3 py-2 text-xs text-forest">{deliveryEstimate}</p>}
                 <div className="grid grid-cols-2 gap-3">
                   {([
                     ['recipientName', 'Full name'],
@@ -507,14 +620,15 @@ function CartDrawer({
                 {checkoutError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{checkoutError}</p>}
                 <div className="space-y-2 rounded-xl bg-white/70 p-4 text-sm">
                   <div className="flex justify-between text-charcoal/60">
-                    <span>Produce subtotal</span><span>{formatCurrency(totalAmount)}</span>
+                    <span>Estimated produce subtotal</span><span>{formatCurrency(totalAmount)}</span>
                   </div>
                   <div className="flex justify-between text-charcoal/60">
-                    <span>Delivery</span><span>{deliveryFee ? formatCurrency(deliveryFee) : 'Free'}</span>
+                    <span>Delivery</span><span>Calculated by server</span>
                   </div>
                   <div className="flex justify-between border-t border-forest/10 pt-2 font-semibold text-forest">
-                    <span>Total payable</span><span>{formatCurrency(payableAmount)}</span>
+                    <span>Final amount</span><span>Confirmed before payment</span>
                   </div>
+                  <p className="text-xs text-charcoal/55">Prices, available stock, serviceability and delivery charges are verified by AgriConnect when you place the order.</p>
                 </div>
                 <button
                   type="submit"
@@ -524,7 +638,7 @@ function CartDrawer({
                   {checkoutBusy && <Loader2 className="h-4 w-4 animate-spin" />}
                   {checkoutBusy
                     ? paymentMethod === 'cod' ? 'Placing order…' : 'Preparing secure checkout…'
-                    : paymentMethod === 'cod' ? `Place order · ${formatCurrency(payableAmount)}` : `Pay ${formatCurrency(payableAmount)}`}
+                    : paymentMethod === 'cod' ? 'Place cash-on-delivery order' : 'Continue to secure payment'}
                 </button>
               </form>
             ) : items.length === 0 ? (
@@ -550,15 +664,21 @@ function CartDrawer({
                         </p>
                         <div className="mt-2 flex items-center gap-2">
                           <button
+                            type="button"
                             onClick={() => onSetQuantity(item.productId, item.quantity - 1)}
-                            className="h-7 w-7 rounded-full border border-forest/20 flex items-center justify-center hover:bg-forest hover:text-ivory transition-colors"
+                            disabled={item.quantity <= item.minOrderQuantity}
+                            aria-label={`Decrease ${item.name} quantity`}
+                            className="h-8 w-8 rounded-full border border-forest/20 flex items-center justify-center hover:bg-forest hover:text-ivory transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Minus className="h-3 w-3" />
                           </button>
                           <span className="text-sm font-medium w-8 text-center">{item.quantity}</span>
                           <button
+                            type="button"
                             onClick={() => onSetQuantity(item.productId, item.quantity + 1)}
-                            className="h-7 w-7 rounded-full border border-forest/20 flex items-center justify-center hover:bg-forest hover:text-ivory transition-colors"
+                            disabled={item.quantity >= item.availableQuantity}
+                            aria-label={`Increase ${item.name} quantity`}
+                            className="h-8 w-8 rounded-full border border-forest/20 flex items-center justify-center hover:bg-forest hover:text-ivory transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Plus className="h-3 w-3" />
                           </button>
@@ -581,14 +701,13 @@ function CartDrawer({
                 <div className="border-t border-forest/10 p-5 space-y-4">
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between text-charcoal/60">
-                      <span>Produce subtotal</span><span>{formatCurrency(totalAmount)}</span>
+                      <span>Estimated subtotal</span><span>{formatCurrency(totalAmount)}</span>
                     </div>
                     <div className="flex justify-between text-charcoal/60">
-                      <span>Delivery {deliveryFee === 0 && '(free over ₹500)'}</span>
-                      <span>{deliveryFee ? formatCurrency(deliveryFee) : 'Free'}</span>
+                      <span>Delivery</span><span>Calculated at checkout</span>
                     </div>
-                    <div className="flex justify-between border-t border-forest/10 pt-2 font-display text-2xl text-forest">
-                      <span>Total</span><span>{formatCurrency(payableAmount)}</span>
+                    <div className="flex justify-between border-t border-forest/10 pt-2 text-sm font-semibold text-forest">
+                      <span>Final total</span><span>Server verified</span>
                     </div>
                   </div>
                   {!isAuthenticated && (

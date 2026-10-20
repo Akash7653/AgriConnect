@@ -121,8 +121,8 @@ export const PaymentService = {
         paymentMethod,
         idempotencyKey,
         deliverySlot: {
-          date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-          timeWindow: '07:00 AM - 11:00 AM',
+          date: new Date().toISOString().slice(0, 10),
+          timeWindow: 'To be confirmed',
         },
       }),
     });

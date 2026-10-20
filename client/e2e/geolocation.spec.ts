@@ -80,7 +80,8 @@ test('denied geolocation keeps manual address entry available', async ({ browser
     await expect(page.getByText('Location permission was denied. Enter your address manually.')).toBeVisible();
     await page.getByLabel('City').fill('Pune');
     await expect(page.getByLabel('City')).toHaveValue('Pune');
-    await expect(page.getByRole('button', { name: /Pay ₹90/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue to secure payment' })).toBeVisible();
+    await expect(page.getByText('Calculated by server')).toBeVisible();
   } finally {
     await context.close();
   }

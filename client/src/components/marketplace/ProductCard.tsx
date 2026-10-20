@@ -9,12 +9,22 @@ import { formatCurrency, classNames } from '@/utils';
 import { Badge } from '@/components/ui';
 
 export function ProductCard({ product, index }: { product: CropProduct; index: number }) {
-  const { add } = useCart();
+  const { add, items } = useCart();
   const { showToast } = useToast();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [quantity, setQuantity] = useState(product.minOrderQuantity);
+  const cartQuantity = items.find((item) => item.productId === product.id)?.quantity ?? 0;
+  const canPurchase = product.stockKg >= product.minOrderQuantity;
 
   function addToCart() {
+    if (!Number.isFinite(quantity) || quantity < product.minOrderQuantity || quantity > product.stockKg) {
+      showToast('Choose a quantity within the available stock.', 'error');
+      return;
+    }
+    if (cartQuantity + quantity > product.stockKg) {
+      showToast(`Only ${Math.max(0, product.stockKg - cartQuantity)} ${product.unit} remain available to add.`, 'error');
+      return;
+    }
     add(product, quantity);
     showToast(`${product.name} added to cart.`, 'success');
     setDetailsOpen(false);
@@ -22,19 +32,21 @@ export function ProductCard({ product, index }: { product: CropProduct; index: n
 
   return (
     <motion.article
-      className="group flex flex-col overflow-hidden rounded-xl border border-forest/8 bg-white transition-all hover:border-forest/20 hover:shadow-cinematic sm:rounded-2xl"
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
+      className="group flex min-w-0 flex-col overflow-hidden rounded-xl border border-forest/10 bg-white transition-colors hover:border-forest/20 sm:rounded-2xl"
+      initial={index < 6 ? { opacity: 0, y: 8 } : false}
+      whileInView={index < 6 ? { opacity: 1, y: 0 } : undefined}
       viewport={{ once: true }}
-      transition={{ duration: 0.4, delay: index * 0.04 }}
+      transition={{ duration: 0.25 }}
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-forest/5">
         {product.imageUrl ? (
           <img
             src={product.imageUrl}
             alt={product.name}
-            className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-700"
+            className="h-full w-full object-cover"
             loading="lazy"
+            decoding="async"
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           />
         ) : (
           <div className="flex h-full items-center justify-center text-agri-green" aria-label="Product image unavailable">
@@ -55,34 +67,34 @@ export function ProductCard({ product, index }: { product: CropProduct; index: n
           <Sprout className="h-3.5 w-3.5" /> by {product.farmerName}
         </p>
 
-        <div className="mt-4 flex items-end justify-between pt-4 border-t border-forest/8 mt-auto">
+        <div className="mt-auto flex items-end justify-between gap-2 border-t border-forest/8 pt-3">
           <div>
-            <p className="font-display text-xl text-forest sm:text-2xl">
+            <p className="font-display text-lg text-forest sm:text-2xl">
               {formatCurrency(product.pricePerUnit, product.currency)}
               <span className="text-sm text-charcoal/50 font-sans">/{product.unit}</span>
             </p>
-            <p
-              className={classNames(
-                'text-xs mt-1',
-                product.stockKg > 100 ? 'text-agri-emerald' : 'text-soil'
-              )}
-            >
-              {product.stockKg} {product.unit} available
+            <p className={classNames('mt-1 text-xs', product.stockKg > 0 ? 'text-agri-green' : 'text-red-700')}>
+              {product.stockKg > 0 ? `${product.stockKg} ${product.unit} available` : 'Out of stock'}
             </p>
           </div>
-          <button
-            onClick={addToCart}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest text-ivory transition-colors hover:bg-agri-emerald hover:text-forest sm:h-10 sm:w-10"
-            aria-label={`Add ${product.name} to cart`}
-          >
-            <Plus className="h-5 w-5" />
-          </button>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {cartQuantity > 0 && <span className="text-[10px] font-medium text-agri-green">{cartQuantity} in cart</span>}
+            <button
+              type="button"
+              onClick={addToCart}
+              disabled={!canPurchase || cartQuantity + product.minOrderQuantity > product.stockKg}
+              className="min-h-10 rounded-xl bg-forest px-3 text-xs font-semibold text-ivory transition-colors hover:bg-agri-emerald hover:text-forest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agri-green disabled:cursor-not-allowed disabled:bg-charcoal/20 disabled:text-charcoal/55"
+              aria-label={`Add ${product.name} to cart`}
+            >
+              {canPurchase ? `Add ${product.minOrderQuantity} ${product.unit}` : 'Unavailable'}
+            </button>
+          </div>
         </div>
       </div>
       <AnimatePresence>
         {detailsOpen && (
-          <motion.div className="fixed inset-0 z-[100] flex items-center justify-center bg-forest/70 p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailsOpen(false); }}>
-            <motion.section role="dialog" aria-modal="true" aria-label={`${product.name} details`} className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-ivory shadow-cinematic" initial={{ y: 12, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: 12, scale: 0.98 }}>
+          <motion.div className="fixed inset-0 z-[100] flex items-end justify-center bg-forest/70 p-0 sm:items-center sm:p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => { if (event.target === event.currentTarget) setDetailsOpen(false); }}>
+            <motion.section role="dialog" aria-modal="true" aria-label={`${product.name} details`} className="max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-ivory pb-[env(safe-area-inset-bottom)] shadow-cinematic sm:rounded-2xl sm:pb-0" initial={{ y: 12, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: 12, scale: 0.98 }}>
               <div className="flex items-center justify-between p-4">
                 <h2 className="font-display text-xl text-forest">{product.name}</h2>
                 <button type="button" onClick={() => setDetailsOpen(false)} aria-label="Close product details" className="rounded-full p-2 text-forest hover:bg-forest/10"><X className="h-5 w-5" /></button>
@@ -96,7 +108,7 @@ export function ProductCard({ product, index }: { product: CropProduct; index: n
                   <label className="text-sm text-charcoal/70">Quantity ({product.unit})
                     <input aria-label={`Quantity for ${product.name}`} type="number" min={product.minOrderQuantity} max={product.stockKg} step="any" value={quantity} onChange={(event) => setQuantity(Number(event.target.value))} className="ml-2 w-28 rounded-lg border border-forest/15 bg-white px-3 py-2" />
                   </label>
-                  <button type="button" onClick={addToCart} disabled={!Number.isFinite(quantity) || quantity < product.minOrderQuantity || quantity > product.stockKg} className="inline-flex items-center gap-2 rounded-full bg-forest px-5 py-2.5 text-sm font-semibold text-ivory disabled:opacity-40"><Plus className="h-4 w-4" />Add to cart</button>
+                  <button type="button" onClick={addToCart} disabled={!canPurchase || !Number.isFinite(quantity) || quantity < product.minOrderQuantity || quantity > product.stockKg || cartQuantity + quantity > product.stockKg} className="inline-flex min-h-11 items-center gap-2 rounded-full bg-forest px-5 py-2.5 text-sm font-semibold text-ivory disabled:opacity-40"><Plus className="h-4 w-4" />Add to cart</button>
                 </div>
               </div>
             </motion.section>

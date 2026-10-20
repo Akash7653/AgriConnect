@@ -10,7 +10,11 @@ export interface ServiceabilityResult {
   configured: boolean;
   serviceable: boolean;
   message: string;
-  zone?: Pick<IServiceZone, '_id' | 'name' | 'city' | 'state' | 'deliveryFeePaise' | 'freeDeliveryThresholdPaise' | 'fulfilmentMethods'>;
+  zone?: Pick<
+    IServiceZone,
+    '_id' | 'name' | 'city' | 'state' | 'deliveryFeePaise' |
+    'freeDeliveryThresholdPaise' | 'estimatedDeliveryDays' | 'fulfilmentMethods'
+  >;
 }
 
 export async function checkServiceability(address: ServiceabilityAddress): Promise<ServiceabilityResult> {
@@ -53,6 +57,7 @@ export async function checkServiceability(address: ServiceabilityAddress): Promi
       state: zone.state,
       deliveryFeePaise: zone.deliveryFeePaise,
       freeDeliveryThresholdPaise: zone.freeDeliveryThresholdPaise,
+      estimatedDeliveryDays: zone.estimatedDeliveryDays,
       fulfilmentMethods: zone.fulfilmentMethods,
     },
   };

@@ -52,7 +52,8 @@ export type ProductCategory =
   | 'pulses'
   | 'spices'
   | 'dairy'
-  | 'herbs';
+  | 'herbs'
+  | 'organic-special';
 
 export interface CartItem {
   productId: string;
@@ -61,6 +62,8 @@ export interface CartItem {
   pricePerUnit: number;
   quantity: number;
   imageUrl: string;
+  availableQuantity: number;
+  minOrderQuantity: number;
 }
 
 export interface Order {

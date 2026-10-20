@@ -237,6 +237,7 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       state: 'Telangana',
       postalCodes: ['500081'],
       active: true,
+      estimatedDeliveryDays: 2,
       fulfilmentMethods: ['supplier_delivery'],
     });
 
@@ -244,6 +245,7 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .get('/api/serviceability')
       .query({ city: 'Hyderabad', state: 'Telangana', pinCode: '500081' });
     expect(supportedRes.body.serviceable).toBe(true);
+    expect(supportedRes.body.zone.estimatedDeliveryDays).toBe(2);
 
     const unsupportedRes = await request(app)
       .get('/api/serviceability')
@@ -252,6 +254,53 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     expect(unsupportedRes.body.serviceable).toBe(false);
 
     await ServiceZone.deleteMany({});
+  });
+
+  it('8. Should return only valid, currently active storefront campaigns', async () => {
+    const previousCampaigns = process.env.STOREFRONT_CAMPAIGNS_JSON;
+    const now = Date.now();
+    process.env.STOREFRONT_CAMPAIGNS_JSON = JSON.stringify([
+      {
+        id: 'active-campaign',
+        title: 'Current vegetable campaign',
+        description: 'Browse this configured vegetable campaign.',
+        imageUrl: 'https://cdn.example.test/vegetables.webp',
+        category: 'vegetables',
+        ctaLabel: 'Browse vegetables',
+        startsAt: new Date(now - 60_000).toISOString(),
+        endsAt: new Date(now + 60_000).toISOString(),
+      },
+      {
+        id: 'expired-campaign',
+        title: 'Expired campaign',
+        description: 'This campaign is no longer active.',
+        imageUrl: 'https://cdn.example.test/expired.webp',
+        category: 'fruits',
+        ctaLabel: 'Browse fruits',
+        endsAt: new Date(now - 60_000).toISOString(),
+      },
+    ]);
+
+    try {
+      const activeResponse = await request(app).get('/api/storefront/campaigns');
+      expect(activeResponse.status).toBe(200);
+      expect(activeResponse.body.campaigns).toHaveLength(1);
+      expect(activeResponse.body.campaigns[0].id).toBe('active-campaign');
+
+      const logSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        process.env.STOREFRONT_CAMPAIGNS_JSON = 'not-json';
+        const invalidResponse = await request(app).get('/api/storefront/campaigns');
+        expect(invalidResponse.status).toBe(500);
+        expect(invalidResponse.body.campaigns).toBeUndefined();
+        expect(logSpy).toHaveBeenCalledWith('[storefront] Invalid STOREFRONT_CAMPAIGNS_JSON configuration');
+      } finally {
+        logSpy.mockRestore();
+      }
+    } finally {
+      if (previousCampaigns === undefined) delete process.env.STOREFRONT_CAMPAIGNS_JSON;
+      else process.env.STOREFRONT_CAMPAIGNS_JSON = previousCampaigns;
+    }
   });
 
   it('8. Should reject admin self-registration and keep requested role access pending approval', async () => {

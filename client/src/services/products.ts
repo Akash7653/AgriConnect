@@ -30,14 +30,16 @@ const categoryNames: Record<ProductCategory, string> = {
   spices: 'Spices',
   'dairy': 'Dairy',
   herbs: 'Greens & Herbs',
+  'organic-special': 'Organic Special',
 };
 
 function mapListing(listing: ProductListResponse['listings'][number]): CropProduct {
-  const category = Object.entries(categoryNames).find(([, label]) => label === listing.category)?.[0];
+  const category = (Object.keys(categoryNames) as ProductCategory[])
+    .find((key) => categoryNames[key] === listing.category);
   return {
     id: listing._id,
     name: listing.cropName,
-    category: (category as ProductCategory | undefined) ?? 'vegetables',
+    category: category ?? 'vegetables',
     unit: listing.unit,
     pricePerUnit: listing.pricePerUnitPaise / 100,
     currency: 'INR',
@@ -53,12 +55,13 @@ function mapListing(listing: ProductListResponse['listings'][number]): CropProdu
 }
 
 export const ProductsService = {
-  async list(session: AuthSession, filters?: { category?: ProductCategory; query?: string; state?: string; district?: string }): Promise<CropProduct[]> {
+  async list(session: AuthSession, filters?: { category?: ProductCategory; query?: string; state?: string; district?: string; limit?: number }): Promise<CropProduct[]> {
     const params = new URLSearchParams();
     if (filters?.category) params.set('category', categoryNames[filters.category]);
     if (filters?.query) params.set('search', filters.query);
     if (filters?.state) params.set('state', filters.state);
     if (filters?.district) params.set('district', filters.district);
+    if (filters?.limit) params.set('limit', String(Math.min(100, filters.limit)));
     const qs = params.toString();
     const data = await request<ProductListResponse>(`/crops${qs ? `?${qs}` : ''}`, { token: session.token });
     return data.listings.map(mapListing);
