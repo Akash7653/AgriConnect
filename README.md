@@ -115,9 +115,9 @@ npm run dev
 
 ---
 
-## 6. Razorpay Test Mode Payment Integration
+## 6. Razorpay Live Payment Integration
 
-AgriConnect integrates official Razorpay Standard Checkout in **TEST MODE** with cryptographic server-side HMAC SHA256 payment verification and concurrency-safe atomic inventory reservation.
+AgriConnect integrates official Razorpay Standard Checkout with cryptographic server-side HMAC SHA256 payment verification and concurrency-safe atomic inventory reservation.
 
 ### Backend Environment Variables
 ```env
@@ -127,9 +127,9 @@ JWT_SECRET=agriconnect_super_secret_jwt_key_2026_production
 CLIENT_URL=http://localhost:3000
 NODE_ENV=development
 
-# Razorpay Test Credentials (Kept strictly on Backend)
-RAZORPAY_KEY_ID=your_test_key_id
-RAZORPAY_KEY_SECRET=your_test_key_secret
+# Razorpay Live Credentials (kept strictly on the backend)
+RAZORPAY_KEY_ID=your_live_key_id
+RAZORPAY_KEY_SECRET=your_live_key_secret
 RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
 ```
 

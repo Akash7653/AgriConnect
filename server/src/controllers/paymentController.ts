@@ -194,7 +194,7 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
       ],
       payment: {
         status: 'pending',
-        gateway: 'razorpay_sandbox',
+        gateway: 'razorpay_standard',
         paymentOrderId: rzpOrder.id,
       },
       idempotencyKey: data.idempotencyKey,
@@ -268,9 +268,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
     }
 
     // Cryptographic HMAC SHA256 Signature Verification
-    const isOfflineSandbox =
-      razorpayOrderId.startsWith('order_sbx_') && !process.env.RAZORPAY_KEY_SECRET;
-    const isValid = isOfflineSandbox || verifyPaymentSignature({
+    const isValid = verifyPaymentSignature({
       razorpayOrderId,
       razorpayPaymentId,
       razorpaySignature,
@@ -311,7 +309,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
 
     order.statusHistory.push({
       status: ORDER_STATUSES.CONFIRMED,
-      note: `Payment verified & captured via Razorpay Test Mode (${razorpayPaymentId})`,
+      note: `Payment verified & captured via Razorpay Standard Checkout (${razorpayPaymentId})`,
       timestamp: new Date(),
       updatedBy: req.user._id,
       role: req.user.role,

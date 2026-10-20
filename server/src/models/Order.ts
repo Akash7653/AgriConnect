@@ -56,7 +56,7 @@ export interface IOrder extends Document {
   statusHistory: IOrderStatusHistory[];
   payment: {
     status: 'pending' | 'captured' | 'failed' | 'refunded';
-    gateway: 'razorpay_sandbox' | 'upi_instant' | 'cod_verified';
+    gateway: 'razorpay_standard' | 'razorpay_sandbox' | 'upi_instant' | 'cod_verified';
     transactionId?: string;
     paymentOrderId?: string;
     paidAt?: Date;
@@ -148,8 +148,8 @@ const OrderSchema = new Schema<IOrder>(
       },
       gateway: {
         type: String,
-        enum: ['razorpay_sandbox', 'upi_instant', 'cod_verified'],
-        default: 'razorpay_sandbox',
+        enum: ['razorpay_standard', 'razorpay_sandbox', 'upi_instant', 'cod_verified'],
+        default: 'razorpay_standard',
       },
       transactionId: String,
       paymentOrderId: String,

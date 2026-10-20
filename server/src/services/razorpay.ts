@@ -8,8 +8,14 @@ export function getRazorpayClient(): Razorpay | null {
   const key_secret = process.env.RAZORPAY_KEY_SECRET;
 
   if (!key_id || !key_secret) {
-    console.warn('⚠️ Razorpay credentials not configured. Payment services will run in offline sandbox mode.');
+    console.error('Razorpay live credentials are not configured.');
     return null;
+  }
+
+  if (!key_id.startsWith('rzp_live_')) {
+    const error = new Error('Live Razorpay credentials are required for payments.') as Error & { statusCode: number };
+    error.statusCode = 500;
+    throw error;
   }
 
   if (!razorpayInstance) {
@@ -17,8 +23,7 @@ export function getRazorpayClient(): Razorpay | null {
       key_id,
       key_secret,
     });
-    const mode = key_id.startsWith('rzp_live_') ? 'Live' : key_id.startsWith('rzp_test_') ? 'Test' : 'Configured';
-    console.log(`💳 Razorpay ${mode} Mode client initialized successfully.`);
+    console.log('💳 Razorpay Live Mode client initialized successfully.');
   }
 
   return razorpayInstance;

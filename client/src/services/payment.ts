@@ -139,7 +139,7 @@ export const PaymentService = {
     try {
       const Razorpay = await loadRazorpay();
       const checkout = new Razorpay({
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID || order.keyId,
+        key: order.keyId,
         amount: order.amountPaise,
         currency: order.currency,
         name: 'AgriConnect',

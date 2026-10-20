@@ -58,12 +58,8 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 app.get('/api/health', (_req, res) => {
   const razorpayKeyId = process.env.RAZORPAY_KEY_ID;
   const razorpayMode = razorpayKeyId?.startsWith('rzp_live_')
-    ? 'Live Mode'
-    : razorpayKeyId?.startsWith('rzp_test_')
-      ? 'Test Mode'
-      : razorpayKeyId
-        ? 'Configured'
-        : 'Unconfigured';
+    ? 'Configured (Live Mode)'
+    : 'Live credentials required';
 
   res.json({
     status: 'healthy',
@@ -71,7 +67,7 @@ app.get('/api/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     version: '1.0.0',
     realtime: 'Socket.IO active',
-    razorpay: razorpayKeyId ? `Configured (${razorpayMode})` : razorpayMode,
+    razorpay: razorpayMode,
   });
 });
 // Root endpoint – simple health/info response
