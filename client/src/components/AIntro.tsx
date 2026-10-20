@@ -45,7 +45,14 @@ export function AIntro({ onComplete }: AIntroProps) {
             opacity: stage === 'zoom' ? { duration: 0.5, ease: 'easeIn' } : { duration: 0.4 },
           }}
         >
-          <svg width="220" height="240" viewBox="0 0 220 240" className="overflow-visible">
+          <svg
+            width="220"
+            height="240"
+            viewBox="0 0 220 240"
+            className="overflow-visible"
+            role="img"
+            aria-label="AgriConnect animated logo"
+          >
             <defs>
               <linearGradient id="aStroke" x1="0" y1="0" x2="1" y2="1">
                 <stop offset="0%" stopColor="#38A169" />

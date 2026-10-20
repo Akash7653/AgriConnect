@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { z } from 'zod';
-import { Order, IOrder, IOrderItem } from '../models/Order.js';
+import { Order, IOrder, IOrderItem, buildSellerFulfilments, SellerFulfilmentStatus } from '../models/Order.js';
 import { CropListing } from '../models/CropListing.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
 import { Notification } from '../models/Notification.js';
@@ -36,6 +36,77 @@ export const createOrderSchema = z.object({
   paymentMethod: z.enum(['razorpay_sandbox', 'upi_instant', 'cod_verified']).default('razorpay_sandbox'),
   idempotencyKey: z.string().optional(),
 });
+
+const preparationRank: Partial<Record<SellerFulfilmentStatus, number>> = {
+  confirmed: 0,
+  accepted: 1,
+  preparing: 2,
+  ready_for_pickup: 3,
+};
+const preparationStatuses: SellerFulfilmentStatus[] = [
+  'confirmed',
+  'accepted',
+  'preparing',
+  'ready_for_pickup',
+];
+
+function ensureSellerFulfilments(order: IOrder): NonNullable<IOrder['sellerFulfilments']> {
+  if (!order.sellerFulfilments?.length) {
+    const distinctSellers = new Set(order.items.map((item) => item.farmerId.toString()));
+    const hasAssignedDelivery = Boolean(order.logistics?.assignedPartnerId);
+    const needsSellerReconciliation = distinctSellers.size > 1
+      && !hasAssignedDelivery
+      && preparationRank[order.status as SellerFulfilmentStatus] !== undefined;
+    const initialStatus: SellerFulfilmentStatus = needsSellerReconciliation
+      ? ORDER_STATUSES.CONFIRMED
+      : order.status as SellerFulfilmentStatus;
+    order.sellerFulfilments = buildSellerFulfilments(
+      order.items,
+      initialStatus,
+    );
+    if (needsSellerReconciliation) {
+      order.status = ORDER_STATUSES.CONFIRMED;
+      order.statusHistory.push({
+        status: ORDER_STATUSES.CONFIRMED,
+        note: 'Seller preparation tracking initialized; each seller must confirm readiness before delivery assignment.',
+        timestamp: new Date(),
+        role: 'system',
+      });
+    }
+  }
+  return order.sellerFulfilments;
+}
+
+function aggregatePreparationStatus(order: IOrder): OrderStatus {
+  const fulfilments = ensureSellerFulfilments(order);
+  const ranks = fulfilments.map((fulfilment) => preparationRank[fulfilment.status]);
+  const validRanks = ranks.filter((rank): rank is number => rank !== undefined);
+  if (!validRanks.length || validRanks.length !== ranks.length) return order.status;
+  return preparationStatuses[Math.min(...validRanks)] as OrderStatus;
+}
+
+function advanceSellerFulfilments(
+  order: IOrder,
+  status: SellerFulfilmentStatus,
+  updatedBy?: IOrder['buyerId'],
+  note?: string,
+): void {
+  const fulfilments = ensureSellerFulfilments(order);
+  const targetRank = preparationRank[status];
+  const timestamp = new Date();
+  for (const fulfilment of fulfilments) {
+    const currentRank = preparationRank[fulfilment.status];
+    if (status !== 'cancelled' && (targetRank === undefined || currentRank === undefined || currentRank >= targetRank)) {
+      if (['picked_up', 'out_for_delivery', 'delivered'].includes(status)) {
+        fulfilment.status = status;
+        fulfilment.statusHistory.push({ status, timestamp, updatedBy, note });
+      }
+      continue;
+    }
+    fulfilment.status = status;
+    fulfilment.statusHistory.push({ status, timestamp, updatedBy, note });
+  }
+}
 
 export async function createOrder(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -156,6 +227,7 @@ export async function createOrder(req: AuthRequest, res: Response): Promise<void
       buyerRole: req.user.role,
       buyerPhone: req.user.phone,
       items: orderItems,
+      sellerFulfilments: buildSellerFulfilments(orderItems, ORDER_STATUSES.CONFIRMED),
       pricing: {
         grossProductValuePaise,
         farmerPayoutPaise,
@@ -200,6 +272,7 @@ export async function createOrder(req: AuthRequest, res: Response): Promise<void
       const fOps = info.totalPaise - fPayout - fComm;
 
       await PayoutLedger.create({
+        idempotencyKey: `sale:${order._id.toString()}:${farmerId}`,
         orderId: order._id,
         orderNumber: order.orderNumber,
         farmerId,
@@ -266,12 +339,15 @@ export async function getBuyerOrders(req: AuthRequest, res: Response): Promise<v
 function farmerVisibleOrder(order: IOrder, farmerId: string) {
   const data = order.toObject() as IOrder;
   const items = data.items.filter((item) => item.farmerId.toString() === farmerId);
+  const sellerFulfilment = data.sellerFulfilments?.find((entry) => entry.farmerId.toString() === farmerId);
   const farmerGrossPaise = items.reduce((sum, item) => sum + item.totalPaise, 0);
   return {
     ...data,
     buyerName: undefined,
     buyerPhone: undefined,
     items,
+    status: sellerFulfilment?.status ?? data.status,
+    sellerFulfilments: sellerFulfilment ? [sellerFulfilment] : [],
     pricing: {
       ...data.pricing,
       grossProductValuePaise: farmerGrossPaise,
@@ -307,6 +383,12 @@ export async function getFarmerOrders(req: AuthRequest, res: Response): Promise<
     }
 
     const orders = await Order.find({ 'items.farmerId': req.user._id }).sort({ createdAt: -1 });
+    for (const order of orders) {
+      if (!order.sellerFulfilments?.length) {
+        ensureSellerFulfilments(order);
+        await order.save();
+      }
+    }
 
     res.json({
       success: true,
@@ -385,6 +467,107 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
       res.status(403).json({ success: false, message: 'Buyers may only cancel their own orders' });
       return;
     }
+    if (req.user.role === USER_ROLES.FARMER) {
+      const farmerStatuses = [
+        ORDER_STATUSES.ACCEPTED,
+        ORDER_STATUSES.PREPARING,
+        ORDER_STATUSES.READY_FOR_PICKUP,
+      ];
+      if (!(farmerStatuses as readonly string[]).includes(status)) {
+        res.status(403).json({ success: false, message: 'Farmers can only advance their own order preparation.' });
+        return;
+      }
+      const fulfilments = ensureSellerFulfilments(order);
+      if (!([ORDER_STATUSES.CONFIRMED, ORDER_STATUSES.ACCEPTED, ORDER_STATUSES.PREPARING] as OrderStatus[]).includes(order.status)) {
+        res.status(409).json({ success: false, message: 'Seller preparation is no longer editable for this order.' });
+        return;
+      }
+
+      const sellerFulfilment = fulfilments.find(
+        (entry) => entry.farmerId.toString() === req.user!._id.toString(),
+      );
+      if (!sellerFulfilment) {
+        res.status(403).json({ success: false, message: 'This order has no fulfilment assigned to your account.' });
+        return;
+      }
+      const nextSellerStatus: Partial<Record<SellerFulfilmentStatus, SellerFulfilmentStatus>> = {
+        confirmed: 'accepted',
+        accepted: 'preparing',
+        preparing: 'ready_for_pickup',
+      };
+      if (nextSellerStatus[sellerFulfilment.status] !== status) {
+        res.status(409).json({
+          success: false,
+          message: `Invalid seller preparation transition from ${sellerFulfilment.status} to ${status}.`,
+        });
+        return;
+      }
+
+      const timestamp = new Date();
+      sellerFulfilment.status = status as SellerFulfilmentStatus;
+      sellerFulfilment.statusHistory.push({
+        status: sellerFulfilment.status,
+        note,
+        timestamp,
+        updatedBy: req.user._id,
+      });
+
+      const aggregateStatus = aggregatePreparationStatus(order);
+      if (aggregateStatus !== order.status) {
+        order.status = aggregateStatus;
+        order.statusHistory.push({
+          status: aggregateStatus,
+          note: `All sellers advanced to ${aggregateStatus.replace(/_/g, ' ')}.`,
+          timestamp,
+          updatedBy: req.user._id,
+          role: req.user.role,
+        });
+      }
+      await order.save();
+
+      const sellerMessage = `${sellerFulfilment.farmerName} updated their items in order #${order.orderNumber} to ${sellerFulfilment.status.replace(/_/g, ' ')}.`;
+      await Notification.create({
+        recipientId: order.buyerId,
+        title: `Seller preparation updated`,
+        message: sellerMessage,
+        type: 'order',
+        link: `/buyer/orders/${order._id}`,
+      });
+      await queueOrderUpdate(order._id.toString(), `seller:${sellerFulfilment.farmerId}:${status}`, sellerMessage);
+      await Notification.create({
+        recipientId: req.user._id,
+        title: `Order preparation: ${sellerFulfilment.status.replace(/_/g, ' ')}`,
+        message: `Your items in order #${order.orderNumber} are now ${sellerFulfilment.status.replace(/_/g, ' ')}.`,
+        type: 'order',
+        link: `/farmer/orders/${order._id}`,
+      });
+      RealtimeNotifier.emitOrderStatusUpdate(order.buyerId.toString(), order._id.toString(), {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        sellerFulfilments: fulfilments.map(({ farmerId, farmerName, status: sellerStatus }) => ({
+          farmerId,
+          farmerName,
+          status: sellerStatus,
+        })),
+        note: sellerMessage,
+        timestamp,
+      });
+      RealtimeNotifier.emitOrderStatusUpdate(req.user._id.toString(), order._id.toString(), {
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        status: sellerFulfilment.status,
+        note: sellerMessage,
+        timestamp,
+      });
+      RealtimeNotifier.emitAdminMetricsRefresh({ type: 'seller_preparation_updated' });
+      res.json({
+        success: true,
+        message: 'Your order preparation status was updated.',
+        order: farmerVisibleOrder(order, req.user._id.toString()),
+      });
+      return;
+    }
     if (status === ORDER_STATUSES.CANCELLED && order.payment.status === 'captured') {
       res.status(409).json({ success: false, message: 'Paid orders require an approved refund workflow before cancellation.' });
       return;
@@ -416,12 +599,7 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
       return;
     }
 
-    const farmerStatuses = [ORDER_STATUSES.ACCEPTED, ORDER_STATUSES.PREPARING, ORDER_STATUSES.READY_FOR_PICKUP];
     const logisticsStatuses = [ORDER_STATUSES.PICKED_UP, ORDER_STATUSES.OUT_FOR_DELIVERY, ORDER_STATUSES.DELIVERED];
-    if (isFarmerInOrder && !isAdmin && !farmerStatuses.includes(status as any)) {
-      res.status(403).json({ success: false, message: 'Farmers can only advance preparation states.' });
-      return;
-    }
     if (logisticsStatuses.includes(status as any) && (
       status === ORDER_STATUSES.DELIVERED ||
       req.user.role !== USER_ROLES.LOGISTICS ||
@@ -463,6 +641,17 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
         { orderId: order._id, entryType: 'sale', settlementStatus: 'accrued' },
         { $set: { settlementStatus: 'processing', automaticPayoutEligibleAt } }
       );
+    }
+
+    if (
+      status === ORDER_STATUSES.CANCELLED ||
+      status === ORDER_STATUSES.ACCEPTED ||
+      status === ORDER_STATUSES.PREPARING ||
+      status === ORDER_STATUSES.READY_FOR_PICKUP ||
+      status === ORDER_STATUSES.PICKED_UP ||
+      status === ORDER_STATUSES.OUT_FOR_DELIVERY
+    ) {
+      advanceSellerFulfilments(order, status as SellerFulfilmentStatus, req.user._id, note);
     }
 
     order.status = status as OrderStatus;
@@ -522,6 +711,11 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
 
     res.json({ success: true, message: 'Order status updated', order });
   } catch (err: any) {
-    res.status(400).json({ success: false, message: err.message });
+    res.status(err?.name === 'VersionError' ? 409 : 400).json({
+      success: false,
+      message: err?.name === 'VersionError'
+        ? 'The order changed while you were updating it. Refresh and try again.'
+        : err.message,
+    });
   }
 }

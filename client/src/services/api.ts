@@ -122,6 +122,8 @@ export const AuthService = {
       ...(u.phone ? { phone: u.phone } : {}),
       role: u.role ?? 'buyer',
       ...(u.requestedRole ? { requestedRole: u.requestedRole } : {}),
+      ...(u.status ? { status: u.status } : {}),
+      ...(typeof u.isVerified === 'boolean' ? { isVerified: u.isVerified } : {}),
       ...(u.requestedFarm ? { requestedFarm: u.requestedFarm } : {}),
       ...(u.address ? { address: u.address } : {}),
     };

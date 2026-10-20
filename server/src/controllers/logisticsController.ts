@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { Order } from '../models/Order.js';
+import { Order, recordSellerFulfilmentStatus } from '../models/Order.js';
 import { Notification } from '../models/Notification.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { USER_ROLES, ORDER_STATUSES, OrderStatus, DEFAULT_PRICING_CONFIG } from '../config/constants.js';
@@ -58,8 +58,15 @@ export async function claimDelivery(req: AuthRequest, res: Response): Promise<vo
           'logistics.partnerPhone': req.user.phone,
           'logistics.pickupTime': now,
           status: ORDER_STATUSES.PICKED_UP,
+          'sellerFulfilments.$[].status': ORDER_STATUSES.PICKED_UP,
         },
         $push: {
+          'sellerFulfilments.$[].statusHistory': {
+            status: ORDER_STATUSES.PICKED_UP,
+            note: 'Combined order picked up by assigned delivery partner.',
+            timestamp: now,
+            updatedBy: req.user._id,
+          },
           statusHistory: {
             status: ORDER_STATUSES.PICKED_UP,
             note: 'Assigned delivery partner picked up the order',
@@ -138,7 +145,7 @@ export async function completeDelivery(req: AuthRequest, res: Response): Promise
     }
 
     const { orderId } = req.params;
-    const { recipientSignature, notes, otp, cashCollected } = req.body;
+    const { recipientSignature, notes, cashCollected } = req.body;
 
     const order = await Order.findById(orderId);
     if (!order) {
@@ -172,7 +179,7 @@ export async function completeDelivery(req: AuthRequest, res: Response): Promise
       ...order.logistics,
       deliveredTime: deliveredAt,
       proofOfDelivery: {
-        otpVerified: typeof otp === 'string' && otp.trim().length > 0,
+        otpVerified: false,
         recipientSignature: recipientSignature.trim(),
         notes: [
           typeof notes === 'string' ? notes.trim().slice(0, 500) : '',
@@ -180,6 +187,13 @@ export async function completeDelivery(req: AuthRequest, res: Response): Promise
         ].filter(Boolean).join(' · '),
       },
     };
+    recordSellerFulfilmentStatus(
+      order,
+      ORDER_STATUSES.DELIVERED,
+      'Combined delivery completed.',
+      req.user._id,
+      deliveredAt,
+    );
     if (isCashOnDelivery && order.payment.status !== 'captured') {
       order.payment.status = 'captured';
       order.payment.paidAt = deliveredAt;
@@ -209,6 +223,7 @@ export async function completeDelivery(req: AuthRequest, res: Response): Promise
         const farmerPayoutPaise = Math.round(total.grossPaise * (settings.farmerSharePct / 100));
         const platformCommissionPaise = Math.round(total.grossPaise * (settings.platformCommissionPct / 100));
         await PayoutLedger.create({
+          idempotencyKey: `sale:${order._id.toString()}:${farmerId}`,
           orderId: order._id,
           orderNumber: order.orderNumber,
           farmerId,

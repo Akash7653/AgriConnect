@@ -7,6 +7,8 @@ export interface User {
   phone?: string;
   role: UserRole;
   requestedRole?: Exclude<UserRole, 'admin'>;
+  status?: 'active' | 'suspended' | 'pending_verification';
+  isVerified?: boolean;
   requestedFarm?: {
     farmName: string;
     village: string;

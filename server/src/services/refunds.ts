@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { AuditLog } from '../models/AuditLog.js';
 import { CropListing } from '../models/CropListing.js';
-import { Order } from '../models/Order.js';
+import { Order, recordSellerFulfilmentStatus } from '../models/Order.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
 import { Refund } from '../models/Refund.js';
 import { ORDER_STATUSES } from '../config/constants.js';
@@ -63,6 +63,12 @@ export async function finalizeRefund(params: {
 
       order.status = ORDER_STATUSES.CANCELLED;
       order.payment.status = 'refunded';
+      recordSellerFulfilmentStatus(
+        order,
+        ORDER_STATUSES.CANCELLED,
+        `Provider-confirmed refund ${params.providerRefundId}`,
+        params.actor?.userId,
+      );
       order.statusHistory.push({
         status: ORDER_STATUSES.CANCELLED,
         note: `Provider-confirmed refund ${params.providerRefundId}`,

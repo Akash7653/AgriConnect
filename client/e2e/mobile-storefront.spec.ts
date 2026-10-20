@@ -99,7 +99,14 @@ test('mobile storefront and buyer shopping flow work across common widths', asyn
   try {
     const page = await context.newPage();
     await page.goto('/');
+    await expect(page.getByRole('img', { name: 'AgriConnect animated logo' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Fresh listings from verified farms.' })).toBeVisible();
+    await expect(page.locator('footer')).toBeHidden();
+    const topMenu = page.getByRole('button', { name: 'Toggle menu' });
+    await expect(topMenu).toBeVisible();
+    await topMenu.click();
+    await expect(page.getByRole('link', { name: 'Shop categories' })).toBeVisible();
+    await page.getByRole('button', { name: 'Toggle menu' }).click();
     await expect(page.getByText('Hyderabad, Hyderabad, Telangana')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Offers and campaigns' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Verified tomato campaign' })).toBeVisible();
@@ -179,6 +186,7 @@ test('mobile storefront and buyer shopping flow work across common widths', asyn
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: /A clearer way/ })).toBeVisible();
+    await expect(page.locator('footer')).toBeVisible();
     const desktopWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(desktopWidth).toBeLessThanOrEqual(1280);
   } finally {

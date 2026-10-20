@@ -68,62 +68,76 @@ test('buyer has category and search tabs in the mobile bar without farmer-specif
   }
 });
 
-test('role-based registration requests approval without granting farmer access', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  let registeredRole = '';
-  let registeredFarmName = '';
-  try {
-    await context.route(`${apiOrigin}/api/**`, (route) => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({}),
-    }));
-    await context.route(`${apiOrigin}/api/auth/register`, async (route) => {
-      const registration = route.request().postDataJSON();
-      registeredRole = registration.role;
-      registeredFarmName = registration.farm?.farmName ?? '';
-      await route.fulfill({
-        status: 201,
+test('all registration roles persist the selected role and explain approval requirements', async ({ browser }) => {
+  for (const role of ['buyer', 'farmer', 'business', 'logistics'] as const) {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    let submittedRole = '';
+    let submittedFarmName = '';
+    try {
+      await context.route(`${apiOrigin}/api/**`, (route) => route.fulfill({
+        status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          token: 'registration-test-token',
-          user: {
-            id: 'farmer-applicant',
-            email: 'farmer@example.test',
-            name: 'Farmer Applicant',
-            role: 'buyer',
-            requestedRole: 'farmer',
-            status: 'pending_verification',
-          },
-        }),
+        body: JSON.stringify({}),
+      }));
+      await context.route(`${apiOrigin}/api/auth/register`, async (route) => {
+        const registration = route.request().postDataJSON();
+        submittedRole = registration.role;
+        submittedFarmName = registration.farm?.farmName ?? '';
+        await route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            token: `registration-test-${role}-token`,
+            user: {
+              id: `${role}-applicant`,
+              email: `${role}@example.test`,
+              name: `${role} Applicant`,
+              role: 'buyer',
+              ...(role === 'buyer' ? {} : { requestedRole: role }),
+              status: role === 'buyer' ? 'active' : 'pending_verification',
+            },
+          }),
+        });
       });
-    });
-    await context.route('**/socket.io/**', (route) => route.abort());
-    const page = await context.newPage();
-    await page.goto('/register?role=farmer');
-    await expect(page.getByLabel('Register as')).toHaveValue('farmer');
-    await page.getByLabel('Full name').fill('Farmer Applicant');
-    await page.getByLabel('Email').fill('farmer@example.test');
-    await page.getByLabel('Phone').fill('9123456789');
-    await page.getByLabel('Farm name').fill('Applicant Farm');
-    await page.getByLabel('Village').fill('Test Village');
-    await page.getByLabel('District').fill('Test District');
-    await page.getByLabel('State').fill('Test State');
-    await page.getByLabel('PIN code').fill('123456');
-    await page.getByLabel('Password', { exact: true }).fill('LongPassword123!');
-    await page.getByLabel('Confirm password').fill('LongPassword123!');
-    await page.getByRole('button', { name: 'Create account' }).click();
-    await expect(page).toHaveURL(/\/dashboard$/);
-    expect(registeredRole).toBe('farmer');
-    expect(registeredFarmName).toBe('Applicant Farm');
-    await expect.poll(() => page.evaluate(() => {
-      const session = JSON.parse(localStorage.getItem('agriconnect_session') ?? '{}');
-      return [session.user.role, session.user.requestedRole];
-    })).toEqual(['buyer', 'farmer']);
-    await expect(page.locator('nav.fixed.bottom-0').getByRole('link', { name: 'Categories' })).toHaveCount(1);
-    await expect(page.locator('nav.fixed.bottom-0').getByRole('link', { name: 'Crop Listings' })).toHaveCount(0);
-  } finally {
-    await context.close();
+      await context.route('**/socket.io/**', (route) => route.abort());
+      const page = await context.newPage();
+      await page.goto(`/register?role=${role}`);
+      await expect(page.getByLabel('Register as')).toHaveValue(role);
+      await page.getByLabel('Full name').fill(`${role} Applicant`);
+      await page.getByLabel('Email').fill(`${role}@example.test`);
+      await page.getByLabel('Phone').fill('9123456789');
+      if (role === 'farmer') {
+        await page.getByLabel('Farm name').fill('Applicant Farm');
+        await page.getByLabel('Village').fill('Test Village');
+        await page.getByLabel('District').fill('Test District');
+        await page.getByLabel('State').fill('Test State');
+        await page.getByLabel('PIN code').fill('123456');
+      }
+      await page.getByLabel('Password', { exact: true }).fill('LongPassword123!');
+      await page.getByLabel('Confirm password').fill('LongPassword123!');
+      await page.getByRole('button', { name: 'Create account' }).click();
+      await expect(page).toHaveURL(/\/dashboard$/);
+      expect(submittedRole).toBe(role);
+      if (role === 'farmer') expect(submittedFarmName).toBe('Applicant Farm');
+      await expect.poll(() => page.evaluate(() => {
+        const session = JSON.parse(localStorage.getItem('agriconnect_session') ?? '{}');
+        return [session.user.role, session.user.requestedRole ?? null, session.user.status];
+      })).toEqual([
+        'buyer',
+        role === 'buyer' ? null : role,
+        role === 'buyer' ? 'active' : 'pending_verification',
+      ]);
+      if (role === 'buyer') {
+        await expect(page.getByRole('heading', { name: /pending review/i })).toHaveCount(0);
+      } else {
+        const labels = { farmer: 'Farmer / Seller', business: 'Business buyer', logistics: 'Delivery partner' };
+        await expect(page.getByRole('heading', { name: `Your ${labels[role]} access is pending review.` })).toBeVisible();
+        await expect(page.getByText(/this account has Buyer access only/i)).toBeVisible();
+        await expect(page.getByRole('link', { name: /Continue with Buyer access/ })).toBeVisible();
+      }
+    } finally {
+      await context.close();
+    }
   }
 });
 

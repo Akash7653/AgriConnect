@@ -17,11 +17,7 @@ function AppRoutes() {
   const [showIntro, setShowIntro] = useState(false);
 
   useEffect(() => {
-    if (isLanding) {
-      setShowIntro(!window.matchMedia('(max-width: 1023px)').matches);
-    } else {
-      setShowIntro(false);
-    }
+    setShowIntro(isLanding);
   }, [isLanding]);
 
   return (
@@ -38,7 +34,7 @@ function AppRoutes() {
         </Routes>
       </AnimatePresence>
       <AdvisorChat />
-      {isLanding && <Footer />}
+      {isLanding && <div className="hidden lg:block"><Footer /></div>}
     </>
   );
 }

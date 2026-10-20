@@ -4,9 +4,10 @@ import crypto from 'crypto';
 import { app } from '../index.js';
 import { connectDB, disconnectDB } from '../config/db.js';
 import { CropListing } from '../models/CropListing.js';
-import { Order } from '../models/Order.js';
+import { Order, buildSellerFulfilments } from '../models/Order.js';
 import { Refund } from '../models/Refund.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
+import { User } from '../models/User.js';
 import { seedDatabase } from '../scripts/seed.js';
 import { expirePendingOrders } from '../jobs/expirePendingOrders.js';
 
@@ -238,6 +239,91 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
 
     expect([400, 503]).toContain(res.status);
     expect(res.body.success).toBe(false);
+  });
+
+  it('5a. Captured payment webhooks create payout ledgers idempotently', async () => {
+    const listing = await CropListing.findOne({ status: 'active' });
+    const buyer = await User.findOne({ email: 'buyer@agriconnect.in' });
+    const farmer = await User.findById(listing?.farmerId);
+    expect(listing && buyer && farmer).toBeTruthy();
+    const amountPaise = listing!.pricePerUnitPaise;
+    const items = [{
+      listingId: listing!._id,
+      cropName: listing!.cropName,
+      unit: listing!.unit,
+      quantity: 1,
+      unitPricePaise: amountPaise,
+      totalPaise: amountPaise,
+      farmerId: farmer!._id,
+      farmerName: farmer!.name,
+      farmLocation: `${listing!.location.district}, ${listing!.location.state}`,
+      qualityGrade: listing!.qualityGrade,
+    }];
+    const order = await Order.create({
+      orderNumber: `WEBHOOK-${Date.now()}`,
+      buyerId: buyer!._id,
+      buyerName: buyer!.name,
+      buyerRole: buyer!.role,
+      buyerPhone: buyer!.phone,
+      items,
+      sellerFulfilments: buildSellerFulfilments(items, 'pending_payment'),
+      pricing: {
+        grossProductValuePaise: amountPaise,
+        farmerPayoutPaise: Math.round(amountPaise * 0.9),
+        platformCommissionPaise: Math.round(amountPaise * 0.08),
+        operationsReservePaise: amountPaise - Math.round(amountPaise * 0.9) - Math.round(amountPaise * 0.08),
+        deliveryFeePaise: 0,
+        finalPayablePaise: amountPaise,
+      },
+      deliveryAddress: { recipientName: buyer!.name, phone: buyer!.phone, addressLine1: 'Address', city: 'Hyderabad', district: 'Hyderabad', state: 'Telangana', pinCode: '500081' },
+      deliverySlot: { date: new Date().toISOString().slice(0, 10), timeWindow: '07:00 AM - 11:00 AM' },
+      status: 'pending_payment',
+      statusHistory: [{ status: 'pending_payment', timestamp: new Date(), role: 'buyer' }],
+      payment: { status: 'pending', gateway: 'razorpay_standard', paymentOrderId: `order_webhook_${Date.now()}` },
+    });
+    const webhookSecret = 'unit-test-capture-webhook-secret';
+    const previousSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    process.env.RAZORPAY_WEBHOOK_SECRET = webhookSecret;
+    const rawPayload = JSON.stringify({
+      event: 'payment.captured',
+      payload: {
+        payment: {
+          entity: {
+            id: `pay_webhook_${Date.now()}`,
+            order_id: order.payment.paymentOrderId,
+            amount: order.pricing.finalPayablePaise,
+            currency: 'INR',
+            status: 'captured',
+          },
+        },
+      },
+    });
+    const signature = crypto.createHmac('sha256', webhookSecret).update(rawPayload).digest('hex');
+
+    try {
+      const response = await request(app)
+        .post('/api/payment/webhook')
+        .set('Content-Type', 'application/json')
+        .set('x-razorpay-event-id', `capture-event-${Date.now()}`)
+        .set('x-razorpay-signature', signature)
+        .send(rawPayload);
+      expect(response.status).toBe(200);
+      const captured = await Order.findById(order._id);
+      expect(captured?.payment.status).toBe('captured');
+      expect(captured?.sellerFulfilments[0].status).toBe('confirmed');
+      expect(await PayoutLedger.countDocuments({ orderId: order._id, farmerId: farmer!._id, entryType: 'sale' })).toBe(1);
+      const repeatedCapture = await request(app)
+        .post('/api/payment/webhook')
+        .set('Content-Type', 'application/json')
+        .set('x-razorpay-event-id', `capture-replay-${Date.now()}`)
+        .set('x-razorpay-signature', signature)
+        .send(rawPayload);
+      expect(repeatedCapture.status).toBe(200);
+      expect(await PayoutLedger.countDocuments({ orderId: order._id, farmerId: farmer!._id, entryType: 'sale' })).toBe(1);
+    } finally {
+      if (previousSecret === undefined) delete process.env.RAZORPAY_WEBHOOK_SECRET;
+      else process.env.RAZORPAY_WEBHOOK_SECRET = previousSecret;
+    }
   });
 
   it('6. Expired pending payment releases reserved stock transactionally', async () => {

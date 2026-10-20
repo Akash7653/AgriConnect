@@ -23,6 +23,29 @@ export interface IOrderStatusHistory {
   role?: string;
 }
 
+export type SellerFulfilmentStatus =
+  | 'pending_payment'
+  | 'confirmed'
+  | 'accepted'
+  | 'preparing'
+  | 'ready_for_pickup'
+  | 'picked_up'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'cancelled';
+
+export interface ISellerFulfilment {
+  farmerId: Types.ObjectId;
+  farmerName: string;
+  status: SellerFulfilmentStatus;
+  statusHistory: Array<{
+    status: SellerFulfilmentStatus;
+    note?: string;
+    timestamp: Date;
+    updatedBy?: Types.ObjectId;
+  }>;
+}
+
 export interface IOrder extends Document {
   orderNumber: string;
   buyerId: Types.ObjectId;
@@ -30,6 +53,7 @@ export interface IOrder extends Document {
   buyerRole: string;
   buyerPhone: string;
   items: IOrderItem[];
+  sellerFulfilments: ISellerFulfilment[];
   pricing: {
     grossProductValuePaise: number; // Sum of items
     farmerPayoutPaise: number; // Configured share (e.g. 90%)
@@ -114,6 +138,45 @@ const OrderSchema = new Schema<IOrder>(
         qualityGrade: { type: String, default: 'A' },
       },
     ],
+    sellerFulfilments: [{
+      farmerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+      farmerName: { type: String, required: true },
+      status: {
+        type: String,
+        enum: [
+          'pending_payment',
+          'confirmed',
+          'accepted',
+          'preparing',
+          'ready_for_pickup',
+          'picked_up',
+          'out_for_delivery',
+          'delivered',
+          'cancelled',
+        ],
+        required: true,
+      },
+      statusHistory: [{
+        status: {
+          type: String,
+          enum: [
+            'pending_payment',
+            'confirmed',
+            'accepted',
+            'preparing',
+            'ready_for_pickup',
+            'picked_up',
+            'out_for_delivery',
+            'delivered',
+            'cancelled',
+          ],
+          required: true,
+        },
+        note: String,
+        timestamp: { type: Date, default: Date.now },
+        updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+      }],
+    }],
     pricing: {
       grossProductValuePaise: { type: Number, required: true },
       farmerPayoutPaise: { type: Number, required: true },
@@ -194,8 +257,49 @@ const OrderSchema = new Schema<IOrder>(
     },
     idempotencyKey: { type: String, unique: true, sparse: true },
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
+
+export function buildSellerFulfilments(
+  items: Pick<IOrderItem, 'farmerId' | 'farmerName'>[],
+  status: SellerFulfilmentStatus,
+  timestamp = new Date(),
+): ISellerFulfilment[] {
+  const sellers = new Map<string, ISellerFulfilment>();
+  for (const item of items) {
+    const farmerId = item.farmerId.toString();
+    if (!sellers.has(farmerId)) {
+      sellers.set(farmerId, {
+        farmerId: item.farmerId,
+        farmerName: item.farmerName,
+        status,
+        statusHistory: [{ status, timestamp }],
+      });
+    }
+  }
+  return [...sellers.values()];
+}
+
+export function recordSellerFulfilmentStatus(
+  order: Pick<IOrder, 'items' | 'sellerFulfilments'>,
+  status: SellerFulfilmentStatus,
+  note: string,
+  updatedBy?: Types.ObjectId,
+  timestamp = new Date(),
+): void {
+  if (!order.sellerFulfilments?.length) {
+    order.sellerFulfilments = buildSellerFulfilments(order.items, status, timestamp);
+    for (const fulfilment of order.sellerFulfilments) {
+      fulfilment.statusHistory[0].note = note;
+      fulfilment.statusHistory[0].updatedBy = updatedBy;
+    }
+    return;
+  }
+  for (const fulfilment of order.sellerFulfilments) {
+    fulfilment.status = status;
+    fulfilment.statusHistory.push({ status, note, timestamp, updatedBy });
+  }
+}
 
 OrderSchema.index({ 'items.farmerId': 1 });
 OrderSchema.index({ 'logistics.assignedPartnerId': 1 });

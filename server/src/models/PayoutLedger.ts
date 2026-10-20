@@ -3,6 +3,7 @@ import mongoose, { Document, Schema, Types } from 'mongoose';
 export interface IPayoutLedger extends Document {
   orderId: Types.ObjectId;
   entryType: 'sale' | 'refund_adjustment';
+  idempotencyKey?: string;
   relatedEntryId?: Types.ObjectId;
   orderNumber: string;
   farmerId: Types.ObjectId;
@@ -29,6 +30,7 @@ const PayoutLedgerSchema = new Schema<IPayoutLedger>(
   {
     orderId: { type: Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
     entryType: { type: String, enum: ['sale', 'refund_adjustment'], default: 'sale', required: true },
+    idempotencyKey: { type: String },
     relatedEntryId: { type: Schema.Types.ObjectId, ref: 'PayoutLedger' },
     orderNumber: { type: String, required: true },
     farmerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -57,5 +59,6 @@ const PayoutLedgerSchema = new Schema<IPayoutLedger>(
 );
 
 PayoutLedgerSchema.index({ farmerId: 1, settlementStatus: 1 });
+PayoutLedgerSchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
 
 export const PayoutLedger = mongoose.model<IPayoutLedger>('PayoutLedger', PayoutLedgerSchema);

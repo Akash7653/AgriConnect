@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, ChevronDown, MapPin, Search, ShoppingCart, Sprout, X } from 'lucide-react';
-import { Logo } from '@/components/Logo';
 import { LocationSelector } from '@/components/marketplace/LocationSelector';
 import { ProductCard } from '@/components/marketplace/ProductCard';
 import { useAuth } from '@/hooks/useAuth';
@@ -177,9 +176,8 @@ export function BuyerHomeExperience() {
 
   return (
     <main className="min-h-screen bg-ivory pb-[calc(5.5rem+env(safe-area-inset-bottom))] text-forest">
-      <div className="mx-auto max-w-7xl px-4 pt-[5.25rem] sm:px-6 lg:pt-24">
-        <header className="flex items-center justify-between gap-3 border-b border-forest/10 pb-3">
-          <Link to="/" aria-label="AgriConnect home"><Logo size="sm" /></Link>
+      <div className="mx-auto max-w-7xl px-4 pt-[4.25rem] sm:px-6 lg:pt-24">
+        <header className="flex items-center justify-end gap-2 border-b border-forest/10 pb-2">
           <button
             type="button"
             onClick={() => { setManualLocation({ city: address?.villageOrCity ?? '', district: address?.district ?? '', state: address?.state ?? '', pinCode: address?.pinCode ?? '' }); setLocationOpen(true); }}

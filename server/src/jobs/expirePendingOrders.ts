@@ -34,8 +34,17 @@ export async function expirePendingOrders(now = new Date()): Promise<number> {
             'payment.expiresAt': { $lte: now },
           },
           {
-            $set: { status: ORDER_STATUSES.CANCELLED, 'payment.status': 'failed' },
+            $set: {
+              status: ORDER_STATUSES.CANCELLED,
+              'payment.status': 'failed',
+              'sellerFulfilments.$[].status': ORDER_STATUSES.CANCELLED,
+            },
             $push: {
+              'sellerFulfilments.$[].statusHistory': {
+                status: ORDER_STATUSES.CANCELLED,
+                note: 'Payment reservation expired before verification.',
+                timestamp: now,
+              },
               statusHistory: {
                 status: ORDER_STATUSES.CANCELLED,
                 note: 'Payment reservation expired before verification.',

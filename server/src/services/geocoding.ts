@@ -7,10 +7,20 @@ export interface ReverseGeocodeResult {
   displayName: string;
 }
 
+export class GeocodingError extends Error {
+  constructor(
+    public readonly statusCode: 422 | 502 | 503,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'GeocodingError';
+  }
+}
+
 export async function reverseGeocode(latitude: number, longitude: number): Promise<ReverseGeocodeResult> {
   const provider = process.env.GEOCODING_PROVIDER || 'nominatim';
   if (provider !== 'nominatim') {
-    throw new Error(`Unsupported geocoding provider: ${provider}`);
+    throw new GeocodingError(503, 'Location lookup is temporarily unavailable. Enter your address manually.');
   }
 
   const params = new URLSearchParams({
@@ -19,17 +29,23 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
     lat: latitude.toString(),
     lon: longitude.toString(),
   });
-  const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
-    headers: {
-      'User-Agent': process.env.APP_BASE_URL
-        ? `AgriConnect/1.0 (${process.env.APP_BASE_URL})`
-        : 'AgriConnect/1.0',
-    },
-    signal: AbortSignal.timeout(8000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+      headers: {
+        'User-Agent': process.env.APP_BASE_URL
+          ? `AgriConnect/1.0 (${process.env.APP_BASE_URL})`
+          : 'AgriConnect/1.0',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    throw new GeocodingError(502, 'Location lookup is temporarily unavailable. Enter your address manually.');
+  }
 
   if (!response.ok) {
-    throw new Error(`Geocoding provider returned ${response.status}.`);
+    const statusCode = response.status === 429 ? 503 : 502;
+    throw new GeocodingError(statusCode, 'Location lookup is temporarily unavailable. Enter your address manually.');
   }
 
   const data = (await response.json()) as {
@@ -39,6 +55,8 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
       town?: string;
       village?: string;
       municipality?: string;
+      suburb?: string;
+      neighbourhood?: string;
       county?: string;
       state_district?: string;
       state?: string;
@@ -47,11 +65,14 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
     };
   };
   const address = data.address;
-  const city = address?.city || address?.town || address?.village || address?.municipality;
+  const city = address?.city || address?.town || address?.village || address?.municipality || address?.suburb || address?.neighbourhood;
   const district = address?.county || address?.state_district || city;
 
   if (!city || !district || !address?.state || !address?.postcode) {
-    throw new Error('The location provider returned an incomplete address.');
+    throw new GeocodingError(
+      422,
+      'We could not find a complete address for this location. Enter your city and PIN code manually.',
+    );
   }
 
   return {

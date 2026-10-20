@@ -64,6 +64,27 @@ Delivery Fee:                 4,000 paise    (₹40.00)  -> Free on orders > ₹
 Customer Final Payable:     104,000 paise  (₹1,040.00)
 ```
 
+## Role access and combined-order fulfilment
+
+| Account role | Dashboard and capabilities |
+| --- | --- |
+| Buyer | Browse the marketplace, manage the cart, check out, and view their own orders. |
+| Business buyer | Use the buyer shopping and order workflow for business purchases. |
+| Farmer | Overview, Crop Listings, Orders, Payouts, and Insights. Farmers manage only their own listings and stock; the farmer navigation does not include Marketplace. |
+| Delivery partner | View and update only assigned delivery tasks, record pickup/dispatch, and submit recipient confirmation. |
+| Admin | Review requested roles, monitor platform data, advance administrative order states, and assign or reassign eligible deliveries. |
+| Applicant awaiting approval | Has buyer-level access until an admin approves the requested Farmer, Business, or Logistics role. The applicant must sign in again after approval to refresh the role in the client session. |
+
+### Order lifecycle
+
+- Checkout validates catalogue stock, serviceability, and prices on the server. Razorpay orders reserve inventory while payment is pending; COD orders are not marked paid until cash collection is confirmed at delivery.
+- A checkout containing items from multiple farmers remains one buyer order, one payment, and one combined delivery task.
+- Each farmer can advance preparation only for their own items: `confirmed` → `accepted` → `preparing` → `ready_for_pickup`. The buyer-facing order advances through preparation only as the least-advanced seller group advances. A delivery partner can be assigned only after all seller groups are ready.
+- The assigned delivery partner claims pickup, marks the order out for delivery, and completes it with recipient confirmation. COD completion additionally requires explicit confirmation that cash was collected. The current confirmation is not an OTP verification.
+- Captured online orders accrue seller payout ledger entries and become eligible for automated settlement after delivery, subject to payout configuration and provider availability. COD settlement remains `on_hold` for manual settlement.
+- Pending payment expiry releases reserved inventory. Refunds are initiated through the admin refund workflow and reconciled against provider confirmation; paid orders cannot be cancelled through the ordinary status endpoint.
+- Older multi-farmer orders without seller-level preparation records are conservatively reconciled when a farmer loads their orders: preparation restarts from `confirmed` and requires each seller to confirm readiness before a new delivery assignment. Existing orders and records are retained.
+
 ---
 
 ## 5. Quick Start (Local Development)

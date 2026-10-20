@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { Order, IOrderItem } from '../models/Order.js';
+import { Order, IOrder, IOrderItem, buildSellerFulfilments, recordSellerFulfilmentStatus } from '../models/Order.js';
 import { CropListing } from '../models/CropListing.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
 import { Notification } from '../models/Notification.js';
@@ -19,6 +19,69 @@ import { checkServiceability } from '../services/serviceability.js';
 import { queueOrderConfirmation } from '../services/email.js';
 import { Refund } from '../models/Refund.js';
 import { finalizeRefund } from '../services/refunds.js';
+
+async function ensureSalePayoutLedgers(order: IOrder | null, buyerName?: string) {
+  if (!order || order.payment.gateway === 'cod_verified' || order.payment.status !== 'captured') return;
+
+  const settings = (await SystemSettings.findOne({ key: 'global_config' })) || {
+    farmerSharePct: 90,
+    platformCommissionPct: 8,
+    opsReservePct: 2,
+  };
+  const farmerTotals = new Map<string, { farmerName: string; totalPaise: number }>();
+  for (const item of order.items) {
+    const farmerId = item.farmerId.toString();
+    const current = farmerTotals.get(farmerId) || { farmerName: item.farmerName, totalPaise: 0 };
+    current.totalPaise += item.totalPaise;
+    farmerTotals.set(farmerId, current);
+  }
+
+  for (const [farmerId, info] of farmerTotals) {
+    const idempotencyKey = `sale:${order._id.toString()}:${farmerId}`;
+    const existing = await PayoutLedger.findOne({
+      orderId: order._id,
+      farmerId,
+      entryType: 'sale',
+    });
+    if (existing) continue;
+
+    const farmerPayoutPaise = Math.round(info.totalPaise * (settings.farmerSharePct / 100));
+    const platformCommissionPaise = Math.round(info.totalPaise * (settings.platformCommissionPct / 100));
+    try {
+      const result = await PayoutLedger.updateOne(
+        { idempotencyKey },
+        {
+          $setOnInsert: {
+            idempotencyKey,
+            orderId: order._id,
+            orderNumber: order.orderNumber,
+            farmerId,
+            farmerName: info.farmerName,
+            grossProductValuePaise: info.totalPaise,
+            farmerSharePct: settings.farmerSharePct,
+            farmerPayoutPaise,
+            platformCommissionPaise,
+            operationsReservePaise: info.totalPaise - farmerPayoutPaise - platformCommissionPaise,
+            settlementStatus: 'accrued',
+          },
+        },
+        { upsert: true },
+      );
+      if (result.upsertedCount > 0) {
+        RealtimeNotifier.emitNewOrderToFarmer(farmerId, {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          amount: info.totalPaise,
+          buyerName,
+        });
+      }
+    } catch (error) {
+      if ((error as { code?: number })?.code !== 11000) throw error;
+      const concurrentEntry = await PayoutLedger.findOne({ idempotencyKey });
+      if (!concurrentEntry) throw error;
+    }
+  }
+}
 
 export const createPaymentOrderSchema = z.object({
   items: z
@@ -208,6 +271,7 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
       buyerRole: req.user.role,
       buyerPhone: req.user.phone,
       items: orderItems,
+      sellerFulfilments: buildSellerFulfilments(orderItems, initialOrderStatus),
       pricing: {
         grossProductValuePaise,
         farmerPayoutPaise,
@@ -333,6 +397,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
 
     // Idempotent check: already paid
     if (order.payment.status === 'captured') {
+      await ensureSalePayoutLedgers(order, req.user.name);
       res.json({
         success: true,
         message: 'Payment already verified (idempotent)',
@@ -361,6 +426,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
       console.warn(`Payment signature verification failed for Order ${order.orderNumber}`);
       order.payment.status = 'failed';
       order.status = ORDER_STATUSES.CANCELLED;
+      recordSellerFulfilmentStatus(order, ORDER_STATUSES.CANCELLED, 'Payment verification failed.');
       order.statusHistory.push({
         status: ORDER_STATUSES.CANCELLED,
         note: 'Payment signature verification failed. Stock released.',
@@ -391,7 +457,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
         payment.order_id === razorpayOrderId &&
         Number(payment.amount) === order.pricing.finalPayablePaise &&
         payment.currency === 'INR' &&
-        ['authorized', 'captured'].includes(payment.status);
+        payment.status === 'captured';
 
       if (!paymentMatchesOrder) {
         res.status(400).json({ success: false, message: 'Payment details do not match the stored order.' });
@@ -404,6 +470,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
     order.payment.transactionId = razorpayPaymentId;
     order.payment.paidAt = new Date();
     order.status = ORDER_STATUSES.CONFIRMED;
+    order.sellerFulfilments = buildSellerFulfilments(order.items, ORDER_STATUSES.CONFIRMED);
 
     order.statusHistory.push({
       status: ORDER_STATUSES.CONFIRMED,
@@ -416,48 +483,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
     await order.save();
     void queueOrderConfirmation(order._id.toString()).catch(() => console.warn('Order confirmation email could not be queued.'));
     RealtimeNotifier.emitAdminMetricsRefresh({ type: 'payment_verified' });
-
-    // Create transparent Payout Ledger records for each farmer
-    const settings = (await SystemSettings.findOne({ key: 'global_config' })) || {
-      farmerSharePct: 90,
-      platformCommissionPct: 8,
-      opsReservePct: 2,
-    };
-
-    const farmerTotals = new Map<string, { farmerName: string; totalPaise: number }>();
-    for (const item of order.items) {
-      const fId = item.farmerId.toString();
-      const existing = farmerTotals.get(fId) || { farmerName: item.farmerName, totalPaise: 0 };
-      existing.totalPaise += item.totalPaise;
-      farmerTotals.set(fId, existing);
-    }
-
-    for (const [farmerId, info] of farmerTotals.entries()) {
-      const fPayout = Math.round(info.totalPaise * (settings.farmerSharePct / 100));
-      const fComm = Math.round(info.totalPaise * (settings.platformCommissionPct / 100));
-      const fOps = info.totalPaise - fPayout - fComm;
-
-      await PayoutLedger.create({
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        farmerId,
-        farmerName: info.farmerName,
-        grossProductValuePaise: info.totalPaise,
-        farmerSharePct: settings.farmerSharePct,
-        farmerPayoutPaise: fPayout,
-        platformCommissionPaise: fComm,
-        operationsReservePaise: fOps,
-        settlementStatus: 'accrued',
-      });
-
-      // Realtime alert to farmer
-      RealtimeNotifier.emitNewOrderToFarmer(farmerId, {
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        amount: info.totalPaise,
-        buyerName: req.user.name,
-      });
-    }
+    await ensureSalePayoutLedgers(order, req.user.name);
 
     // Notify buyer
     RealtimeNotifier.emitOrderStatusUpdate(order.buyerId.toString(), order._id.toString(), {
@@ -588,6 +614,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
         order.payment.transactionId = paymentPayload?.id || order.payment.transactionId;
         order.payment.paidAt = new Date();
         order.status = ORDER_STATUSES.CONFIRMED;
+        order.sellerFulfilments = buildSellerFulfilments(order.items, ORDER_STATUSES.CONFIRMED);
 
         order.statusHistory.push({
           status: ORDER_STATUSES.CONFIRMED,
@@ -600,6 +627,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
         void queueOrderConfirmation(order._id.toString()).catch(() => console.warn('Order confirmation email could not be queued.'));
         RealtimeNotifier.emitAdminMetricsRefresh({ type: 'webhook_payment_captured' });
       }
+      await ensureSalePayoutLedgers(order);
     }
   } else if (eventType === 'payment.failed') {
     if (razorpayOrderId) {
@@ -608,6 +636,11 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
       if (order && order.payment.status !== 'captured') {
         order.payment.status = 'failed';
         order.status = ORDER_STATUSES.CANCELLED;
+        recordSellerFulfilmentStatus(
+          order,
+          ORDER_STATUSES.CANCELLED,
+          `Payment failed: ${paymentPayload?.error_description || 'Transaction failed'}`,
+        );
         order.statusHistory.push({
           status: ORDER_STATUSES.CANCELLED,
           note: `Webhook reported payment failure: ${paymentPayload?.error_description || 'Transaction failed'}`,

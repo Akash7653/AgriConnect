@@ -15,6 +15,7 @@ import { useAuth } from '@/hooks/useAuth';
 import type { UserRole } from '@/types';
 import { DashboardShell } from '@/components/dashboard/DashboardShell';
 import { navByRole } from '@/components/dashboard/DashboardShell';
+import { RoleRequestPendingPage } from '@/pages/dashboard/RoleRequestPendingPage';
 
 const dashboards: Record<UserRole, ComponentType> = {
   farmer: FarmerDashboard,
@@ -38,6 +39,10 @@ export function DashboardRoute() {
 
   if (!isAuthenticated) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+  }
+
+  if (user?.status === 'pending_verification' && user.requestedRole) {
+    return <RoleRequestPendingPage />;
   }
 
   const Dash = dashboards[role] ?? FarmerDashboard;

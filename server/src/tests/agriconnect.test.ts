@@ -4,7 +4,7 @@ import { app } from '../index.js';
 import { connectDB, disconnectDB } from '../config/db.js';
 import { CropListing } from '../models/CropListing.js';
 import { ServiceZone } from '../models/ServiceZone.js';
-import { Order } from '../models/Order.js';
+import { Order, buildSellerFulfilments } from '../models/Order.js';
 import { User } from '../models/User.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
 import { seedDatabase } from '../scripts/seed.js';
@@ -303,7 +303,46 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     }
   });
 
-  it('8. Should reject admin self-registration and keep requested role access pending approval', async () => {
+  it('9. Should distinguish invalid coordinates and incomplete or unavailable geocoding results', async () => {
+    const previousProvider = process.env.GEOCODING_PROVIDER;
+    process.env.GEOCODING_PROVIDER = 'nominatim';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        address: {
+          suburb: 'Test Suburb',
+          county: 'Test District',
+          state: 'Test State',
+        },
+        display_name: 'Test Suburb, Test State',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const invalidCoordinates = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ latitude: 120, longitude: 80 });
+      expect(invalidCoordinates.status).toBe(400);
+
+      const incompleteAddress = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ latitude: 18.5, longitude: 73.8 });
+      expect(incompleteAddress.status).toBe(422);
+      expect(incompleteAddress.body.message).toMatch(/enter your city and PIN code manually/i);
+
+      const providerUnavailable = await request(app)
+        .post('/api/location/reverse-geocode')
+        .send({ latitude: 18.5, longitude: 73.8 });
+      expect(providerUnavailable.status).toBe(502);
+      expect(providerUnavailable.body.message).toMatch(/temporarily unavailable/i);
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousProvider === undefined) delete process.env.GEOCODING_PROVIDER;
+      else process.env.GEOCODING_PROVIDER = previousProvider;
+    }
+  });
+
+  it('10. Should reject admin self-registration and keep requested role access pending approval', async () => {
     const res = await request(app).post('/api/auth/register').send({
       name: 'Untrusted Role User',
       email: `role-test-${Date.now()}@example.com`,
@@ -337,6 +376,22 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     expect(roleRequest.body.user.requestedFarm.farmName).toBe('Applicant Farm');
     expect(roleRequest.body.user.status).toBe('pending_verification');
 
+    const additionalRoleRequests: Array<{ id: string; requestedRole: 'business' | 'logistics' }> = [];
+    for (const requestedRole of ['business', 'logistics'] as const) {
+      const response = await request(app).post('/api/auth/register').send({
+        name: `${requestedRole} Applicant`,
+        email: `${requestedRole}-request-${Date.now()}@example.com`,
+        password: 'StrongPassword123!',
+        phone: '9123456789',
+        role: requestedRole,
+      });
+      expect(response.status).toBe(201);
+      expect(response.body.user.role).toBe('buyer');
+      expect(response.body.user.requestedRole).toBe(requestedRole);
+      expect(response.body.user.status).toBe('pending_verification');
+      additionalRoleRequests.push(response.body.user);
+    }
+
     const adminLogin = await request(app).post('/api/auth/login').send({
       email: 'admin@agriconnect.in',
       password: testSeedPassword,
@@ -348,6 +403,11 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     expect(pendingApplicants.body.users.some((user: { _id: string; requestedRole: string }) =>
       user._id === roleRequest.body.user.id && user.requestedRole === 'farmer'
     )).toBe(true);
+    for (const applicant of additionalRoleRequests) {
+      expect(pendingApplicants.body.users.some((user: { _id: string; requestedRole: string }) =>
+        user._id === applicant.id && user.requestedRole === applicant.requestedRole
+      )).toBe(true);
+    }
 
     const approval = await request(app)
       .patch(`/api/admin/users/${roleRequest.body.user.id}/role`)
@@ -360,6 +420,17 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     expect(approval.body.user.role).toBe('farmer');
     expect(approval.body.user.requestedRole).toBeUndefined();
     expect(approval.body.user.status).toBe('active');
+
+    for (const applicant of additionalRoleRequests) {
+      const roleApproval = await request(app)
+        .patch(`/api/admin/users/${applicant.id}/role`)
+        .set('Authorization', `Bearer ${adminLogin.body.token}`)
+        .send({ role: applicant.requestedRole });
+      expect(roleApproval.status).toBe(200);
+      expect(roleApproval.body.user.role).toBe(applicant.requestedRole);
+      expect(roleApproval.body.user.requestedRole).toBeUndefined();
+      expect(roleApproval.body.user.status).toBe('active');
+    }
 
     const manualApproval = await request(app)
       .patch(`/api/admin/users/${customerRegistration.body.user.id}/role`)
@@ -431,6 +502,15 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .set('Authorization', `Bearer ${deliveryAgentToken}`);
     expect(unassignedClaim.status).toBe(409);
 
+    const buyerClaim = await request(app)
+      .post(`/api/logistics/claim/${order._id}`)
+      .set('Authorization', `Bearer ${buyerLogin.body.token}`);
+    expect(buyerClaim.status).toBe(403);
+    const farmerClaim = await request(app)
+      .post(`/api/logistics/claim/${order._id}`)
+      .set('Authorization', `Bearer ${farmerToken}`);
+    expect(farmerClaim.status).toBe(403);
+
     const assignment = await request(app)
       .post(`/api/admin/orders/${order!._id}/assign-delivery`)
       .set('Authorization', `Bearer ${adminLogin.body.token}`)
@@ -485,6 +565,16 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .set('Authorization', `Bearer ${deliveryAgentToken}`)
       .send({ recipientSignature: 'Recipient confirmed' });
     expect(staleAgentCompletion.status).toBe(403);
+    const buyerCompletion = await request(app)
+      .post(`/api/logistics/complete/${order._id}`)
+      .set('Authorization', `Bearer ${buyerLogin.body.token}`)
+      .send({ recipientSignature: 'Recipient confirmed' });
+    expect(buyerCompletion.status).toBe(403);
+    const farmerCompletion = await request(app)
+      .post(`/api/logistics/complete/${order._id}`)
+      .set('Authorization', `Bearer ${farmerToken}`)
+      .send({ recipientSignature: 'Recipient confirmed' });
+    expect(farmerCompletion.status).toBe(403);
 
     const directDeliveredStatus = await request(app)
       .patch(`/api/orders/${order._id}/status`)
@@ -517,6 +607,113 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .filter((ledger: { settlementStatus: string }) => ['accrued', 'processing', 'on_hold'].includes(ledger.settlementStatus))
       .reduce((sum: number, ledger: { farmerPayoutPaise: number }) => sum + ledger.farmerPayoutPaise, 0);
     expect(farmerPayouts.body.summary.pendingSettlementPaise).toBe(expectedPending);
+  });
+
+  it('9a. Should track multi-farmer preparation separately and block early delivery assignment', async () => {
+    const buyer = await User.findOne({ email: 'buyer@agriconnect.in' });
+    const firstFarmer = await User.findOne({ email: 'farmer@agriconnect.in' });
+    const secondFarmer = await User.findOne({ email: 'ramesh.farmer@agriconnect.in' });
+    const firstListing = await CropListing.findOne({ farmerId: firstFarmer?._id, status: 'active' });
+    const secondListing = await CropListing.findOne({ farmerId: secondFarmer?._id, status: 'active' });
+    expect(buyer && firstFarmer && secondFarmer && firstListing && secondListing).toBeTruthy();
+
+    const items = [
+      {
+        listingId: firstListing!._id,
+        cropName: firstListing!.cropName,
+        unit: firstListing!.unit,
+        quantity: 1,
+        unitPricePaise: firstListing!.pricePerUnitPaise,
+        totalPaise: firstListing!.pricePerUnitPaise,
+        farmerId: firstFarmer!._id,
+        farmerName: firstFarmer!.name,
+        farmLocation: `${firstListing!.location.district}, ${firstListing!.location.state}`,
+        qualityGrade: firstListing!.qualityGrade,
+      },
+      {
+        listingId: secondListing!._id,
+        cropName: secondListing!.cropName,
+        unit: secondListing!.unit,
+        quantity: 1,
+        unitPricePaise: secondListing!.pricePerUnitPaise,
+        totalPaise: secondListing!.pricePerUnitPaise,
+        farmerId: secondFarmer!._id,
+        farmerName: secondFarmer!.name,
+        farmLocation: `${secondListing!.location.district}, ${secondListing!.location.state}`,
+        qualityGrade: secondListing!.qualityGrade,
+      },
+    ];
+    const totalPaise = items.reduce((total, item) => total + item.totalPaise, 0);
+    const order = await Order.create({
+      orderNumber: `MULTI-${Date.now()}`,
+      buyerId: buyer!._id,
+      buyerName: buyer!.name,
+      buyerRole: buyer!.role,
+      buyerPhone: buyer!.phone,
+      items,
+      sellerFulfilments: buildSellerFulfilments(items, 'confirmed'),
+      pricing: {
+        grossProductValuePaise: totalPaise,
+        farmerPayoutPaise: Math.round(totalPaise * 0.9),
+        platformCommissionPaise: Math.round(totalPaise * 0.08),
+        operationsReservePaise: totalPaise - Math.round(totalPaise * 0.9) - Math.round(totalPaise * 0.08),
+        deliveryFeePaise: 0,
+        finalPayablePaise: totalPaise,
+      },
+      deliveryAddress: { recipientName: buyer!.name, phone: buyer!.phone, addressLine1: 'Farm road', city: 'Hyderabad', district: 'Hyderabad', state: 'Telangana', pinCode: '500081' },
+      deliverySlot: { date: new Date().toISOString().slice(0, 10), timeWindow: '07:00 AM - 11:00 AM' },
+      status: 'confirmed',
+      statusHistory: [{ status: 'confirmed', timestamp: new Date(), role: 'buyer' }],
+      payment: { status: 'captured', gateway: 'razorpay_standard' },
+    });
+
+    const firstLogin = await request(app).post('/api/auth/login').send({ email: firstFarmer!.email, password: testSeedPassword });
+    const secondLogin = await request(app).post('/api/auth/login').send({ email: secondFarmer!.email, password: testSeedPassword });
+    const buyerLogin = await request(app).post('/api/auth/login').send({ email: buyer!.email, password: testSeedPassword });
+    const adminLogin = await request(app).post('/api/auth/login').send({ email: 'admin@agriconnect.in', password: testSeedPassword });
+    const agent = await User.findOne({ email: 'logistics@agriconnect.in' });
+    expect(firstLogin.status).toBe(200);
+    expect(secondLogin.status).toBe(200);
+    expect(buyerLogin.status).toBe(200);
+
+    const updateSeller = (token: string, status: string) => request(app)
+      .patch(`/api/orders/${order._id}/status`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status });
+
+    const firstAccepted = await updateSeller(firstLogin.body.token, 'accepted');
+    expect(firstAccepted.status).toBe(200);
+    expect(firstAccepted.body.order.status).toBe('accepted');
+    expect((await Order.findById(order._id))?.status).toBe('confirmed');
+
+    const buyerCannotAdvance = await updateSeller(buyerLogin.body.token, 'accepted');
+    expect(buyerCannotAdvance.status).toBe(403);
+
+    expect((await updateSeller(secondLogin.body.token, 'accepted')).status).toBe(200);
+    expect((await Order.findById(order._id))?.status).toBe('accepted');
+    expect((await updateSeller(firstLogin.body.token, 'preparing')).status).toBe(200);
+    expect((await Order.findById(order._id))?.status).toBe('accepted');
+    expect((await updateSeller(secondLogin.body.token, 'preparing')).status).toBe(200);
+    expect((await Order.findById(order._id))?.status).toBe('preparing');
+    expect((await updateSeller(firstLogin.body.token, 'ready_for_pickup')).status).toBe(200);
+    expect((await Order.findById(order._id))?.status).toBe('preparing');
+
+    const earlyAssignment = await request(app)
+      .post(`/api/admin/orders/${order._id}/assign-delivery`)
+      .set('Authorization', `Bearer ${adminLogin.body.token}`)
+      .send({ deliveryAgentId: agent!._id.toString() });
+    expect(earlyAssignment.status).toBe(409);
+
+    expect((await updateSeller(secondLogin.body.token, 'ready_for_pickup')).status).toBe(200);
+    const readyOrder = await Order.findById(order._id);
+    expect(readyOrder?.status).toBe('ready_for_pickup');
+    expect(readyOrder?.sellerFulfilments.every((seller) => seller.status === 'ready_for_pickup')).toBe(true);
+
+    const assignment = await request(app)
+      .post(`/api/admin/orders/${order._id}/assign-delivery`)
+      .set('Authorization', `Bearer ${adminLogin.body.token}`)
+      .send({ deliveryAgentId: agent!._id.toString() });
+    expect(assignment.status).toBe(200);
   });
 
   it('10. Should prevent manual confirmation and refunds before provider payment capture', async () => {

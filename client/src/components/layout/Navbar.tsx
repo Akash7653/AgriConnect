@@ -38,10 +38,11 @@ export function Navbar() {
       <header
         className={classNames(
           'fixed top-0 left-0 right-0 z-50 transition-all duration-500',
-          mobileHome ? 'hidden lg:block' : '',
-          solid
-            ? 'bg-forest/95 backdrop-blur-md border-b border-white/5 py-3'
-            : 'bg-transparent py-5'
+          mobileHome
+            ? 'bg-forest/95 backdrop-blur-md border-b border-white/10 py-2 lg:border-white/5 lg:py-3'
+            : solid
+              ? 'bg-forest/95 backdrop-blur-md border-b border-white/5 py-3'
+              : 'bg-transparent py-5'
         )}
       >
         <div className="mx-auto max-w-9xl px-5 sm:px-8 flex items-center justify-between">
@@ -92,14 +93,21 @@ export function Navbar() {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="fixed inset-0 z-40 bg-forest lg:hidden pt-24 px-6 pb-8"
+            className="fixed inset-0 z-40 overflow-y-auto bg-forest px-6 pb-8 pt-24 lg:hidden"
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.25 }}
           >
             <nav className="flex flex-col gap-1">
-              {navLinks.map((l) => (
+              {(mobileHome && isShopper
+                ? [
+                    { label: 'Shop categories', href: '/dashboard/marketplace#categories' },
+                    { label: 'Search products', href: '/dashboard/marketplace#product-search' },
+                    { label: 'My orders', href: '/dashboard/orders' },
+                    { label: 'My account', href: '/dashboard' },
+                  ]
+                : navLinks).map((l) => (
                 <a
                   key={l.label}
                   href={l.href}
@@ -111,19 +119,23 @@ export function Navbar() {
               ))}
             </nav>
             <div className="mt-6 flex flex-col gap-3">
-              <ModeSwitch />
-              <Link
-                to="/login"
-                className="text-center py-3 rounded-full border border-ivory/30 text-ivory font-medium"
-              >
-                Sign in
-              </Link>
-              <Link
-                to="/register"
-                className="text-center py-3 rounded-full bg-agri-emerald text-forest font-semibold"
-              >
-                Get Started
-              </Link>
+              {!isShopper && (
+                <>
+                  <ModeSwitch />
+                  <Link
+                    to="/login"
+                    className="text-center py-3 rounded-full border border-ivory/30 text-ivory font-medium"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    to="/register"
+                    className="text-center py-3 rounded-full bg-agri-emerald text-forest font-semibold"
+                  >
+                    Get Started
+                  </Link>
+                </>
+              )}
             </div>
           </motion.div>
         )}

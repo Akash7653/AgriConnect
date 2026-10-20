@@ -407,14 +407,13 @@ export async function assignDeliveryAgent(req: AuthRequest, res: Response): Prom
       res.status(404).json({ success: false, message: 'Order not found.' });
       return;
     }
-    const eligibleStatuses: OrderStatus[] = [
-      ORDER_STATUSES.CONFIRMED,
-      ORDER_STATUSES.ACCEPTED,
-      ORDER_STATUSES.PREPARING,
-      ORDER_STATUSES.READY_FOR_PICKUP,
-    ];
-    if (!eligibleStatuses.includes(currentOrder.status)) {
-      res.status(409).json({ success: false, message: 'Delivery can only be assigned or reassigned before pickup.' });
+    const eligibleStatuses: OrderStatus[] = [ORDER_STATUSES.READY_FOR_PICKUP];
+    const sellerCount = new Set(currentOrder.items.map((item) => item.farmerId.toString())).size;
+    const allSellersReady = currentOrder.sellerFulfilments?.length
+      ? currentOrder.sellerFulfilments.every((fulfilment) => fulfilment.status === ORDER_STATUSES.READY_FOR_PICKUP)
+      : sellerCount === 1;
+    if (currentOrder.status !== ORDER_STATUSES.READY_FOR_PICKUP || !allSellersReady) {
+      res.status(409).json({ success: false, message: 'Delivery can only be assigned after every seller is ready for pickup.' });
       return;
     }
     const previousAgentId = currentOrder.logistics?.assignedPartnerId;

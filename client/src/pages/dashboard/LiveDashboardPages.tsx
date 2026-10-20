@@ -23,6 +23,7 @@ interface MarketplaceOrder {
   status: string;
   buyerName?: string;
   items: OrderItem[];
+  sellerFulfilments?: Array<{ farmerId: string; farmerName: string; status: string }>;
   pricing: { finalPayablePaise: number };
   payment?: { gateway: string; status: string };
   deliveryAddress?: { recipientName?: string; addressLine1?: string; city?: string; district?: string; state?: string; pinCode?: string; phone?: string };
@@ -120,6 +121,11 @@ function OrderList({ orders, children }: { orders: MarketplaceOrder[]; children?
             <p className="font-medium text-forest">{order.orderNumber}</p>
             <p className="mt-1 text-sm text-charcoal/60">{order.items.map((item) => `${item.cropName} × ${item.quantity} ${item.unit}`).join(', ')}</p>
             <p className="mt-1 text-xs capitalize text-charcoal/45">{order.status.replace(/_/g, ' ')} · {formatDate(order.createdAt)}</p>
+            {order.sellerFulfilments && order.sellerFulfilments.length > 1 && (
+              <p className="mt-1 text-xs text-charcoal/55">
+                Seller preparation: {order.sellerFulfilments.map((seller) => `${seller.farmerName}: ${seller.status.replace(/_/g, ' ')}`).join(' · ')}
+              </p>
+            )}
             {order.payment?.gateway === 'cod_verified' && (
               <p className="mt-1 text-xs font-medium text-soil-dark">
                 Cash on delivery · {order.payment.status === 'captured' ? 'cash collected' : 'payment due'}

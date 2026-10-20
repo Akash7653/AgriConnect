@@ -74,7 +74,7 @@ export function RegisterPage() {
       showToast(
         role === 'buyer'
           ? 'Your buyer account was created successfully.'
-          : `Your buyer account is ready. Your ${registrationRoleLabel(role)} access request is pending admin approval.`,
+          : `Your ${registrationRoleLabel(role)} registration was received. Access is pending admin approval.`,
         'success'
       );
       navigate('/dashboard');
