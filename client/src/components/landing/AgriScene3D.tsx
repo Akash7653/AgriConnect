@@ -117,7 +117,7 @@ export function AgriScene3D({ className }: AgriScene3DProps) {
   return (
     <div className={className}>
       <Canvas
-        shadows
+        shadows="basic"
         dpr={[1, 1.5]}
         camera={{ position: [0, 2.2, 5], fov: 42 }}
         gl={{ antialias: true, alpha: true }}

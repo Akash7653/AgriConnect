@@ -128,8 +128,8 @@ CLIENT_URL=http://localhost:3000
 NODE_ENV=development
 
 # Razorpay Test Credentials (Kept strictly on Backend)
-RAZORPAY_KEY_ID=rzp_test_TpKiLPPIf43Ogk
-RAZORPAY_KEY_SECRET=htDwjL8qE2xCQuli66YjJvXd
+RAZORPAY_KEY_ID=your_test_key_id
+RAZORPAY_KEY_SECRET=your_test_key_secret
 RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
 ```
 

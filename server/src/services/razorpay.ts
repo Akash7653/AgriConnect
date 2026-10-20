@@ -51,8 +51,9 @@ export async function createRazorpayOrder(options: {
     };
   } catch (err: any) {
     console.error('Failed to create Razorpay order:', err);
-    const error = new Error(`Razorpay Order Creation Failed: ${err.message}`) as Error & { statusCode: number };
-    error.statusCode = err.statusCode || err.status || 500;
+    const description = err?.error?.description || err?.message || 'Unknown Razorpay API error';
+    const error = new Error(`Razorpay Order Creation Failed: ${description}`) as Error & { statusCode: number };
+    error.statusCode = err?.statusCode || err?.status || 500;
     throw error;
   }
 }
