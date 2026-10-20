@@ -5,6 +5,8 @@ import { FarmerProfile } from '../models/FarmerProfile.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { USER_ROLES } from '../config/constants.js';
 import { RealtimeNotifier } from '../socket/index.js';
+import { User } from '../models/User.js';
+import { SEEDED_DEMO_ACCOUNT_EMAILS } from '../config/demoAccounts.js';
 
 export const createListingSchema = z.object({
   cropName: z.string().min(2, 'Crop name is required'),
@@ -83,6 +85,7 @@ export async function createListing(req: AuthRequest, res: Response): Promise<vo
       availableQuantity: newListing.availableQuantity,
       status: newListing.status,
     });
+    RealtimeNotifier.emitAdminMetricsRefresh({ type: 'listing_created' });
 
     res.status(201).json({
       success: true,
@@ -113,6 +116,11 @@ export async function getListings(req: Request, res: Response): Promise<void> {
     const { search, category, grade, state, district, organic, minPrice, maxPrice, sortBy, order, page, limit } = filters;
 
     const query: any = { status: 'active', availableQuantity: { $gt: 0 } };
+
+    if (process.env.NODE_ENV === 'production') {
+      const seededUsers = await User.find({ email: { $in: SEEDED_DEMO_ACCOUNT_EMAILS } }).select('_id').lean();
+      query.farmerId = { $nin: seededUsers.map((user) => user._id) };
+    }
 
     if (search) {
       const safeSearch = escapeRegex(search);
@@ -281,6 +289,7 @@ export async function updateListing(req: AuthRequest, res: Response): Promise<vo
       availableQuantity: listing.availableQuantity,
       status: listing.status,
     });
+    RealtimeNotifier.emitAdminMetricsRefresh({ type: 'listing_updated' });
 
     res.json({ success: true, message: 'Listing updated successfully', listing });
   } catch (err: any) {

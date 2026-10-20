@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ServiceZone } from '../models/ServiceZone.js';
 import mongoose from 'mongoose';
 import { RealtimeNotifier } from '../socket/index.js';
+import { SEEDED_DEMO_ACCOUNT_EMAILS } from '../config/demoAccounts.js';
 import { Order } from '../models/Order.js';
 import { PayoutLedger } from '../models/PayoutLedger.js';
 import { SystemSettings } from '../models/SystemSettings.js';
@@ -22,6 +23,14 @@ export async function getAdminAnalytics(req: AuthRequest, res: Response): Promis
       return;
     }
 
+    const seededUsers = process.env.NODE_ENV === 'production'
+      ? await User.find({ email: { $in: SEEDED_DEMO_ACCOUNT_EMAILS } }).select('_id').lean()
+      : [];
+    const seededUserIds = seededUsers.map((user) => user._id);
+    const productionUserFilter = process.env.NODE_ENV === 'production'
+      ? { email: { $nin: SEEDED_DEMO_ACCOUNT_EMAILS } }
+      : {};
+
     const [
       totalUsers,
       totalFarmers,
@@ -32,12 +41,12 @@ export async function getAdminAnalytics(req: AuthRequest, res: Response): Promis
       settings,
       recentDisputes,
     ] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ role: USER_ROLES.FARMER }),
-      User.countDocuments({ role: USER_ROLES.FARMER, isVerified: true }),
-      CropListing.countDocuments({ status: 'active' }),
-      Order.countDocuments(),
-      Order.find().lean(),
+      User.countDocuments(productionUserFilter),
+      User.countDocuments({ ...productionUserFilter, role: USER_ROLES.FARMER }),
+      User.countDocuments({ ...productionUserFilter, role: USER_ROLES.FARMER, isVerified: true }),
+      CropListing.countDocuments({ status: 'active', farmerId: { $nin: seededUserIds } }),
+      Order.countDocuments({ buyerId: { $nin: seededUserIds } }),
+      Order.find({ buyerId: { $nin: seededUserIds } }).lean(),
       SystemSettings.findOne({ key: 'global_config' }),
       Dispute.find().sort({ createdAt: -1 }).limit(5),
     ]);
@@ -122,7 +131,9 @@ export async function getUsers(req: AuthRequest, res: Response): Promise<void> {
       search: z.string().trim().max(80).optional(),
     }).strict().parse(req.query);
     const { role, status, search } = filters;
-    const query: any = {};
+    const query: any = process.env.NODE_ENV === 'production'
+      ? { email: { $nin: SEEDED_DEMO_ACCOUNT_EMAILS } }
+      : {};
     if (role && role !== 'all') query.role = role;
     if (status && status !== 'all') query.status = status;
     if (search && typeof search === 'string') {
@@ -349,7 +360,10 @@ export async function deactivateServiceZone(req: AuthRequest, res: Response): Pr
 
 export async function getAdminOrders(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 }).limit(100);
+    const seededUsers = process.env.NODE_ENV === 'production'
+      ? await User.find({ email: { $in: SEEDED_DEMO_ACCOUNT_EMAILS } }).select('_id').lean()
+      : [];
+    const orders = await Order.find({ buyerId: { $nin: seededUsers.map((user) => user._id) } }).sort({ createdAt: -1 }).limit(100);
     res.json({ success: true, orders });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -403,6 +417,7 @@ export async function assignDeliveryAgent(req: AuthRequest, res: Response): Prom
       message: `Order ${order.orderNumber} is assigned to you.`,
       orderId: order._id.toString(),
     });
+    RealtimeNotifier.emitAdminMetricsRefresh({ type: 'delivery_assigned' });
 
     res.json({ success: true, order });
   } catch (err: any) {

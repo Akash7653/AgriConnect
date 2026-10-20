@@ -343,6 +343,7 @@ export async function verifyPayment(req: AuthRequest, res: Response): Promise<vo
     });
 
     await order.save();
+    RealtimeNotifier.emitAdminMetricsRefresh({ type: 'payment_verified' });
 
     // Create transparent Payout Ledger records for each farmer
     const settings = (await SystemSettings.findOne({ key: 'global_config' })) || {
@@ -506,7 +507,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
         });
 
         await order.save();
-        console.log(`Webhook reconciled Order ${order.orderNumber} as CAPTURED.`);
+        RealtimeNotifier.emitAdminMetricsRefresh({ type: 'webhook_payment_captured' });
       }
     }
   } else if (eventType === 'payment.failed') {
@@ -534,6 +535,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
         }
 
         await order.save();
+        RealtimeNotifier.emitAdminMetricsRefresh({ type: 'webhook_payment_failed' });
       }
     }
   }

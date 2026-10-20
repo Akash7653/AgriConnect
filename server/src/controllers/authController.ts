@@ -7,6 +7,7 @@ import { BuyerProfile } from '../models/BuyerProfile.js';
 import { signToken, AuthRequest } from '../middleware/auth.js';
 import { USER_ROLES } from '../config/constants.js';
 import { AuditLog } from '../models/AuditLog.js';
+import { SEEDED_DEMO_ACCOUNT_EMAILS } from '../config/demoAccounts.js';
 
 export const registerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -33,16 +34,6 @@ const profileUpdateSchema = z.object({
     pinCode: z.string().min(5).max(12).optional(),
   }).strict().optional(),
 }).strict();
-
-const seededDemoAccounts = new Set([
-  'admin@agriconnect.in',
-  'farmer@agriconnect.in',
-  'ramesh.farmer@agriconnect.in',
-  'lakshmi.farmer@agriconnect.in',
-  'buyer@agriconnect.in',
-  'business@agriconnect.in',
-  'logistics@agriconnect.in',
-]);
 
 export async function register(req: Request, res: Response): Promise<void> {
   try {
@@ -111,7 +102,7 @@ export async function login(req: Request, res: Response): Promise<void> {
   try {
     const data = loginSchema.parse(req.body);
 
-    if (process.env.NODE_ENV === 'production' && seededDemoAccounts.has(data.email.toLowerCase())) {
+    if (process.env.NODE_ENV === 'production' && SEEDED_DEMO_ACCOUNT_EMAILS.includes(data.email.toLowerCase() as typeof SEEDED_DEMO_ACCOUNT_EMAILS[number])) {
       res.status(401).json({ success: false, message: 'Invalid email or password' });
       return;
     }

@@ -427,6 +427,7 @@ export async function updateOrderStatus(req: AuthRequest, res: Response): Promis
     }
 
     await order.save();
+    RealtimeNotifier.emitAdminMetricsRefresh({ type: 'order_status_updated' });
 
     // Notify buyer and emit real-time event
     await Notification.create({

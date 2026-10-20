@@ -89,6 +89,7 @@ To configure external services:
 cp server/.env.example server/.env
 ```
 Set `SEED_PASSWORD` in that local file before first startup if you want development seed accounts. Production never runs the seed script.
+For first production admin provisioning, register the operator as a customer and run `ADMIN_BOOTSTRAP_EMAIL=<existing-account-email> npm --prefix server run bootstrap:admin` once in a trusted environment with production `MONGODB_URI` and `JWT_SECRET` available.
 
 ### 3. Run Development Servers
 ```bash
