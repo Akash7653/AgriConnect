@@ -12,8 +12,9 @@ export function getRazorpayClient(): Razorpay | null {
     return null;
   }
 
-  if (!key_id.startsWith('rzp_live_')) {
-    const error = new Error('Live Razorpay credentials are required for payments.') as Error & { statusCode: number };
+  const isLiveMode = key_id.startsWith('rzp_live_');
+  if (process.env.NODE_ENV === 'production' && !isLiveMode) {
+    const error = new Error('Live Razorpay credentials are required in production.') as Error & { statusCode: number };
     error.statusCode = 500;
     throw error;
   }
@@ -23,7 +24,7 @@ export function getRazorpayClient(): Razorpay | null {
       key_id,
       key_secret,
     });
-    console.log('💳 Razorpay Live Mode client initialized successfully.');
+    console.log(`💳 Razorpay ${isLiveMode ? 'Live' : 'Test'} Mode client initialized successfully.`);
   }
 
   return razorpayInstance;

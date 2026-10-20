@@ -57,9 +57,15 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 // Healthcheck
 app.get('/api/health', (_req, res) => {
   const razorpayKeyId = process.env.RAZORPAY_KEY_ID;
-  const razorpayMode = razorpayKeyId?.startsWith('rzp_live_')
+  const isLiveMode = razorpayKeyId?.startsWith('rzp_live_');
+  const requiresLiveMode = process.env.NODE_ENV === 'production';
+  const razorpayMode = isLiveMode
     ? 'Configured (Live Mode)'
-    : 'Live credentials required';
+    : requiresLiveMode
+      ? 'Live credentials required'
+      : razorpayKeyId
+        ? 'Configured (Test Mode)'
+        : 'Razorpay credentials required';
 
   res.json({
     status: 'healthy',

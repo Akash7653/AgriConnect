@@ -115,9 +115,9 @@ npm run dev
 
 ---
 
-## 6. Razorpay Live Payment Integration
+## 6. Razorpay Payment Integration
 
-AgriConnect integrates official Razorpay Standard Checkout with cryptographic server-side HMAC SHA256 payment verification and concurrency-safe atomic inventory reservation.
+AgriConnect integrates official Razorpay Standard Checkout with cryptographic server-side HMAC SHA256 payment verification and concurrency-safe atomic inventory reservation. Development may use Test Mode; production requires Live Mode credentials.
 
 ### Backend Environment Variables
 ```env
