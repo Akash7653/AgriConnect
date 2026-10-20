@@ -3,6 +3,10 @@ import request from 'supertest';
 import { app } from '../index.js';
 
 describe('browser origin allowlist', () => {
+  it('trusts the single Render proxy hop for client IP rate limiting', () => {
+    expect(app.get('trust proxy')).toBe(1);
+  });
+
   it('allows the deployed Vercel origin to complete API preflight requests', async () => {
     const response = await request(app)
       .options('/api/crops')

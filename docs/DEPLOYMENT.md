@@ -2,7 +2,7 @@
 
 ## Backend on Render
 
-Set `NODE_ENV=production`, `MONGODB_URI`, `JWT_SECRET`, `CLIENT_URL`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in the backend service. `CLIENT_URL` must contain the full frontend origin, without a path or trailing slash (for example, `https://agri-connect-seven-snowy.vercel.app`). Multiple approved origins can be comma-separated. The deployed AgriConnect Vercel origin is also explicitly allowed by the server. Use a matching Razorpay mode pair; production requires `rzp_live_`.
+Set `NODE_ENV=production`, `MONGODB_URI`, `JWT_SECRET`, `CLIENT_URL`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in the backend service. The server trusts one Render proxy hop so rate limiting uses the forwarded client IP. `CLIENT_URL` must contain the full frontend origin, without a path or trailing slash (for example, `https://agri-connect-seven-snowy.vercel.app`). Multiple approved origins can be comma-separated. The deployed AgriConnect Vercel origin is also explicitly allowed by the server. Use a matching Razorpay mode pair; production requires `rzp_live_`.
 
 For the agricultural assistant, set `GROK_API_KEY` as a backend-only secret. `GROK_MODEL` defaults to `grok-3-mini`. The assistant uses a multilingual general-guidance fallback if Grok is not configured or unavailable.
 

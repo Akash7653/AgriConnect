@@ -45,6 +45,7 @@ import { startAutomaticPayoutJob } from './jobs/automaticPayouts.js';
 import { getAllowedClientOrigins } from './config/clientOrigins.js';
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 server.requestTimeout = 30_000;
 server.headersTimeout = 35_000;
