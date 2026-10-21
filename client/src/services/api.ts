@@ -52,7 +52,7 @@ interface AuthResponse {
 interface RegistrationResponse {
   success: boolean;
   message: string;
-  verification: { emailSent: boolean; phoneCodeSent: boolean };
+  verification: { emailSent: boolean };
 }
 
 export const AuthService = {
@@ -93,24 +93,10 @@ export const AuthService = {
     });
   },
 
-  async resendPhoneVerification(email: string): Promise<{ message: string }> {
-    return request<{ message: string }>('/auth/verification/phone/resend', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-  },
-
-  async confirmEmailVerification(token: string): Promise<{ email: string; emailVerified: boolean; phoneVerified: boolean }> {
-    return request<{ email: string; emailVerified: boolean; phoneVerified: boolean }>('/auth/verification/email/confirm', {
+  async confirmEmailVerification(token: string): Promise<{ email: string; emailVerified: boolean }> {
+    return request<{ email: string; emailVerified: boolean }>('/auth/verification/email/confirm', {
       method: 'POST',
       body: JSON.stringify({ token }),
-    });
-  },
-
-  async confirmPhoneVerification(email: string, code: string): Promise<{ emailVerified: boolean; phoneVerified: boolean }> {
-    return request<{ emailVerified: boolean; phoneVerified: boolean }>('/auth/verification/phone/confirm', {
-      method: 'POST',
-      body: JSON.stringify({ email, code }),
     });
   },
 
@@ -118,7 +104,7 @@ export const AuthService = {
     fullName: string;
     email: string;
     password: string;
-    phone: string;
+    phone?: string;
     role: Exclude<User['role'], 'admin'>;
     farm?: {
       farmName: string;
@@ -140,7 +126,7 @@ export const AuthService = {
         name: payload.fullName,
         email: payload.email,
         password: payload.password,
-        phone: payload.phone,
+        ...(payload.phone ? { phone: payload.phone } : {}),
         role: payload.role,
         ...(payload.farm ? { farm: payload.farm } : {}),
       }),
@@ -176,7 +162,6 @@ export const AuthService = {
       ...(u.status ? { status: u.status } : {}),
       ...(typeof u.isVerified === 'boolean' ? { isVerified: u.isVerified } : {}),
       ...(typeof u.emailVerified === 'boolean' ? { emailVerified: u.emailVerified } : {}),
-      ...(typeof u.phoneVerified === 'boolean' ? { phoneVerified: u.phoneVerified } : {}),
       ...(u.requestedFarm ? { requestedFarm: u.requestedFarm } : {}),
       ...(u.address ? { address: u.address } : {}),
     };

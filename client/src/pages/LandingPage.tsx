@@ -14,6 +14,7 @@ import { AgriculturalIntelligence } from '@/components/landing/AgriculturalIntel
 import { FarmerValue } from '@/components/landing/FarmerValue';
 import { FinalCTA } from '@/components/landing/FinalCTA';
 import { BuyerHomeExperience } from '@/components/marketplace/BuyerHomeExperience';
+import { MobilePublicLanding } from '@/components/landing/MobilePublicLanding';
 import { useAuth } from '@/hooks/useAuth';
 
 export function LandingPage() {
@@ -30,9 +31,11 @@ export function LandingPage() {
     return () => media.removeEventListener('change', update);
   }, []);
 
-  if (mobileLayout && (!user || user.role === 'buyer' || user.role === 'business')) {
+  if (mobileLayout && (user?.role === 'buyer' || user?.role === 'business')) {
     return <BuyerHomeExperience />;
   }
+
+  if (mobileLayout && !user) return <MobilePublicLanding />;
 
   return (
     <>

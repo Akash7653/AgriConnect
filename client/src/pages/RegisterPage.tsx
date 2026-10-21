@@ -42,12 +42,8 @@ export function RegisterPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (!fullName || !email || !phone || !password) {
+    if (!fullName || !email || !password) {
       setError('Please fill in all required fields.');
-      return;
-    }
-    if (phone.replace(/\D/g, '').length < 10) {
-      setError('Please enter a valid phone number with at least 10 digits.');
       return;
     }
     if (password.length < 12) {
@@ -70,12 +66,19 @@ export function RegisterPage() {
     }
     setLoading(true);
     try {
-      const result = await signUp({ fullName, email, password, phone, role, ...(role === 'farmer' ? { farm } : {}) });
+      const result = await signUp({
+        fullName,
+        email,
+        password,
+        ...(phone.trim() ? { phone: phone.trim() } : {}),
+        role,
+        ...(role === 'farmer' ? { farm } : {}),
+      });
       showToast(
-        result.verification.emailSent && result.verification.phoneCodeSent
-          ? 'Account created. Verify your email and phone to sign in.'
-          : 'Account created. Use the verification page to resend any missing messages.',
-        result.verification.emailSent && result.verification.phoneCodeSent ? 'success' : 'error'
+        result.verification.emailSent
+          ? 'Account created. Check your email to verify your address.'
+          : 'Account created, but the verification email could not be sent. Retry from the verification page.',
+        result.verification.emailSent ? 'success' : 'error'
       );
       navigate('/verify-account', {
         state: { email: email.trim().toLowerCase(), verification: result.verification },
@@ -119,8 +122,8 @@ export function RegisterPage() {
         </label>
         <p className="rounded-lg bg-forest/5 p-3 text-sm text-charcoal/65">
           {role === 'buyer'
-            ? 'Verify your email address and phone number to activate sign-in.'
-            : `Verify your email and phone before signing in. ${registrationRoleLabel(role)} access also requires administrator approval.`}
+            ? 'Verify your email address to activate sign-in. A phone number is optional.'
+            : `Verify your email before signing in. ${registrationRoleLabel(role)} access also requires administrator approval.`}
         </p>
         {role === 'farmer' && (
           <fieldset className="grid gap-3 rounded-xl border border-forest/10 p-4 sm:grid-cols-2">
@@ -158,7 +161,7 @@ export function RegisterPage() {
           onChange={(e) => setEmail(e.target.value)}
         />
         <Input
-          label="Phone"
+          label="Phone (optional)"
           name="phone"
           type="tel"
           autoComplete="tel"

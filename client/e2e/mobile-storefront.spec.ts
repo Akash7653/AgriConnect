@@ -110,21 +110,21 @@ test('mobile storefront and buyer shopping flow work across common widths', asyn
     await page.getByRole('button', { name: 'Open account' }).click();
     await expect(page.getByRole('menuitem', { name: 'Continue shopping' })).toBeVisible();
     await page.getByRole('button', { name: 'Open account' }).click();
-    await expect(page.getByText('Hyderabad, Hyderabad, Telangana')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Change delivery location: Hyderabad, Hyderabad, Telangana/ })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Offers and campaigns' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Verified tomato campaign' })).toBeVisible();
     await page.getByRole('button', { name: 'Browse vegetables' }).click();
     await expect(page).toHaveURL(/category=vegetables/);
     await page.getByRole('navigation', { name: 'Buyer navigation' }).getByRole('link', { name: 'Home' }).click();
 
-    await page.getByRole('button', { name: 'Change delivery location' }).click();
+    await page.getByRole('button', { name: 'Change delivery location', exact: true }).click();
     const locationDialog = page.getByRole('dialog', { name: 'Delivery location' });
     await locationDialog.getByLabel('City / locality').fill('Pune');
     await locationDialog.getByLabel('District').fill('Pune');
     await locationDialog.getByLabel('State').fill('Maharashtra');
     await locationDialog.getByLabel('PIN code').fill('411001');
     await locationDialog.getByRole('button', { name: 'Save delivery location' }).click();
-    await expect(page.getByText('Pune, Pune, Maharashtra')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Change delivery location: Pune, Pune, Maharashtra/ })).toBeVisible();
     await expect(page.getByText('Estimated delivery within 2 days after order confirmation. Timing may vary.')).toBeVisible();
     await expect.poll(() => savedAddress).toMatchObject({
       villageOrCity: 'Pune',
@@ -197,7 +197,7 @@ test('mobile storefront and buyer shopping flow work across common widths', asyn
   }
 });
 
-test('guest mobile landing shows live catalogue products instead of an empty sign-in screen', async ({ page }) => {
+test('guest mobile storefront shows live catalogue products instead of an empty sign-in screen', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route('**/socket.io/**', (route) => route.abort());
   await page.route(`${apiOrigin}/api/storefront/campaigns`, (route) => route.fulfill({
@@ -227,11 +227,128 @@ test('guest mobile landing shows live catalogue products instead of an empty sig
     }),
   }));
 
-  await page.goto('/');
+  await page.goto('/shop');
   await expect(page.getByRole('heading', { name: 'Your daily market, grown nearby.' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Shop by category' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Available produce' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add Farm Fresh Tomatoes to cart' })).toBeVisible();
   await expect(page.getByText('by Green Farm', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('public mobile landing stays separate from shopping and provides working account entry', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Good food starts with the people who grow it.' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Browse produce' })).toHaveAttribute('href', '/shop');
+  await expect(page.getByRole('link', { name: 'Join as a farmer' }).first()).toHaveAttribute('href', '/register?role=farmer');
+  await expect(page.getByRole('navigation', { name: 'Buyer navigation' })).toHaveCount(0);
+  const landingNavigation = page.getByRole('navigation', { name: 'Mobile landing navigation' });
+  await expect(landingNavigation.getByRole('link', { name: 'Home' })).toBeVisible();
+  await expect(landingNavigation.getByRole('link', { name: 'Shop' })).toHaveAttribute('href', '/shop');
+  await expect(landingNavigation.getByRole('link', { name: 'Cart, 0 items' })).toHaveAttribute('href', '/dashboard/marketplace#cart');
+  await expect(landingNavigation.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/login');
+  await expect(page.locator('footer')).toBeHidden();
+
+  await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toHaveCount(0);
+  const accountButton = page.getByRole('button', { name: 'Open account' });
+  await expect(accountButton).toBeVisible();
+  const deliveryButton = page.getByRole('button', { name: /Change delivery location/ });
+  await expect(deliveryButton).toBeVisible();
+  for (const width of [320, 360, 375, 390, 430]) {
+    await page.setViewportSize({ width, height: 740 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth), `horizontal overflow at ${width}px`)
+      .toBeLessThanOrEqual(width);
+  }
+  await page.setViewportSize({ width: 320, height: 740 });
+  await deliveryButton.click();
+  await expect(page).toHaveURL('/shop');
+  await expect(page.getByRole('dialog', { name: 'Delivery location' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close location selector' }).click();
+
+  await page.getByRole('button', { name: 'Switch to dark mode' }).click();
+  const deliveryLabel = page.getByText('Deliver to', { exact: true });
+  await expect(deliveryLabel).toBeVisible();
+  await expect.poll(() => deliveryLabel.evaluate((element) => getComputedStyle(element).color))
+    .toBe('rgba(247, 245, 237, 0.68)');
+
+  await accountButton.click();
+  await expect(page.getByRole('menuitem', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+  await expect(page.getByRole('menuitem', { name: 'Create account' })).toHaveAttribute('href', '/register');
+  await accountButton.click();
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+});
+
+test('guest cart survives the sign-in redirect and opens at checkout entry', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/socket.io/**', (route) => route.abort());
+  const catalogue = {
+    success: true,
+    listings: [{
+      _id: 'guest-cart-tomato',
+      cropName: 'Cart Tomatoes',
+      category: 'Vegetables',
+      unit: 'kg',
+      pricePerUnitPaise: 4200,
+      availableQuantity: 12,
+      minOrderQuantity: 1,
+      images: [],
+      location: { district: 'Hyderabad', state: 'Telangana' },
+      farmerId: { name: 'Green Farm' },
+      description: 'Fresh farm tomatoes.',
+    }],
+  };
+  await page.route(`${apiOrigin}/api/storefront/campaigns`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ campaigns: [] }),
+  }));
+  await page.route(`${apiOrigin}/api/storefront/products**`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(catalogue),
+  }));
+  await page.route(`${apiOrigin}/api/crops**`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(catalogue),
+  }));
+  await page.route(`${apiOrigin}/api/auth/login`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      token: 'browser-buyer-token',
+      user: {
+        id: 'guest-cart-buyer',
+        name: 'Cart Buyer',
+        email: 'cart-buyer@example.test',
+        role: 'buyer',
+        phone: '9123456789',
+        status: 'active',
+        emailVerified: true,
+      },
+    }),
+  }));
+  await page.route(`${apiOrigin}/api/serviceability**`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ configured: false, serviceable: false }),
+  }));
+
+  await page.goto('/shop');
+  await page.getByRole('button', { name: 'Add Cart Tomatoes to cart' }).click();
+  await expect(page.getByRole('button', { name: 'Open cart, 1 items' })).toBeVisible();
+  await page.getByRole('button', { name: 'Dismiss notification' }).click();
+  await page.getByRole('button', { name: 'Open cart, 1 items' }).click();
+  await expect(page).toHaveURL(/\/login\?redirect=/);
+  await page.getByLabel('Email').fill('cart-buyer@example.test');
+  await page.getByLabel('Password').fill('correct-password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+
+  await expect(page).toHaveURL(/\/dashboard\/marketplace#cart$/);
+  await expect(page.getByRole('heading', { name: 'Your Cart' })).toBeVisible();
+  await expect(page.locator('aside').getByText('Cart Tomatoes', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Cart, 1 items' })).toBeVisible();
 });

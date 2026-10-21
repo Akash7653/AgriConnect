@@ -4,6 +4,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { AccountMenu } from '@/components/layout/AccountMenu';
 import { BuyerMobileNavigation } from '@/components/layout/BuyerMobileNavigation';
+import { DeliveryLocationButton } from '@/components/layout/DeliveryLocationButton';
 import { useAuth } from '@/hooks/useAuth';
 import { classNames } from '@/utils';
 import { ModeSwitch } from './ModeSwitch';
@@ -43,8 +44,9 @@ export function Navbar() {
         )}
       >
         <div className="mx-auto flex max-w-9xl items-center justify-between px-4 sm:px-8">
-          <Link to="/" aria-label="AgriConnect home">
-            <Logo variant="light" size="md" />
+          <Link to="/" aria-label="AgriConnect home" className="shrink-0">
+            <Logo variant="light" size="sm" className="max-[380px]:hidden" />
+            <Logo variant="light" size="sm" showWordmark={false} className="hidden max-[380px]:flex" />
           </Link>
 
           <nav className="hidden items-center gap-7 lg:flex" aria-label="Main navigation">
@@ -90,11 +92,7 @@ export function Navbar() {
 
           <div className="flex items-center gap-2 lg:hidden">
             <ModeSwitch compact />
-            {!isAuthenticated && (
-              <Link to="/login" className="rounded-lg px-2 py-2 text-sm font-medium text-ivory">
-                Sign in
-              </Link>
-            )}
+            {isMobileStorefront && <DeliveryLocationButton />}
             <AccountMenu dark />
           </div>
         </div>

@@ -10,7 +10,6 @@ export interface User {
   status?: 'active' | 'suspended' | 'pending_verification';
   isVerified?: boolean;
   emailVerified?: boolean;
-  phoneVerified?: boolean;
   requestedFarm?: {
     farmName: string;
     village: string;

@@ -17,6 +17,7 @@ const CartContext = createContext<CartContextValue | null>(null);
 export function CartProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? 'guest';
+  const canShop = user?.role === 'buyer' || user?.role === 'business';
   const [cart, setCart] = useState<{ ownerId: string; items: CartItem[] }>(() => ({
     ownerId: userId,
     items: readCart(userId),
@@ -27,12 +28,27 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (cart.ownerId !== userId) setCart({ ownerId: userId, items: readCart(userId) });
-  }, [cart.ownerId, userId]);
-
-  useEffect(() => {
-    localStorage.setItem(`agriconnect_cart:${cart.ownerId}`, JSON.stringify(cart.items));
-  }, [cart]);
+    if (cart.ownerId !== userId) {
+      const isBuyerLogin = cart.ownerId === 'guest' && userId !== 'guest' && canShop;
+      const nextItems = isBuyerLogin
+        ? mergeCartItems(readCart(userId), cart.items)
+        : readCart(userId);
+      setCart({ ownerId: userId, items: nextItems });
+      if (isBuyerLogin) {
+        try {
+          localStorage.removeItem('agriconnect_cart:guest');
+        } catch (error) {
+          console.error('Guest cart could not be cleared after sign-in.', error);
+        }
+      }
+      return;
+    }
+    try {
+      localStorage.setItem(`agriconnect_cart:${cart.ownerId}`, JSON.stringify(cart.items));
+    } catch (error) {
+      console.error('Shopping cart could not be saved on this device.', error);
+    }
+  }, [cart, userId, canShop]);
 
   const value = useMemo<CartContextValue>(() => {
     const add: CartContextValue['add'] = (product, quantity) => {
@@ -112,6 +128,22 @@ function readCart(userId: string): CartItem[] {
   } catch {
     return [];
   }
+}
+
+function mergeCartItems(accountItems: CartItem[], guestItems: CartItem[]): CartItem[] {
+  const merged = new Map(accountItems.map((item) => [item.productId, item]));
+  for (const guestItem of guestItems) {
+    const accountItem = merged.get(guestItem.productId);
+    const availableQuantity = accountItem
+      ? Math.min(accountItem.availableQuantity, guestItem.availableQuantity)
+      : guestItem.availableQuantity;
+    merged.set(guestItem.productId, {
+      ...(accountItem ?? guestItem),
+      availableQuantity,
+      quantity: Math.min(availableQuantity, (accountItem?.quantity ?? 0) + guestItem.quantity),
+    });
+  }
+  return [...merged.values()];
 }
 
 export function useCart(): CartContextValue {

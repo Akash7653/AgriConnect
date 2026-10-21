@@ -38,7 +38,8 @@ export function DashboardRoute() {
     : 'farmer';
 
   if (!isAuthenticated) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+    const returnTo = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={`/login?redirect=${encodeURIComponent(returnTo)}`} replace />;
   }
 
   if (user?.status === 'pending_verification' && user.requestedRole) {

@@ -3,7 +3,7 @@ import { AuthService, request } from '@/services/api';
 import type { AuthSession, User } from '@/types';
 
 interface SignUpResult {
-  verification: { emailSent: boolean; phoneCodeSent: boolean };
+  verification: { emailSent: boolean };
 }
 
 interface AuthContextValue {
@@ -16,7 +16,7 @@ interface AuthContextValue {
     fullName: string;
     email: string;
     password: string;
-    phone: string;
+    phone?: string;
     role: Exclude<User['role'], 'admin'>;
     farm?: {
       farmName: string;

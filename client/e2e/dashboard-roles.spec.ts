@@ -78,6 +78,7 @@ test('all registration roles persist the selected role and explain approval requ
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     let submittedRole = '';
     let submittedFarmName = '';
+    let submittedPhone: string | undefined;
     try {
       await context.route(`${apiOrigin}/api/**`, (route) => route.fulfill({
         status: 200,
@@ -88,12 +89,13 @@ test('all registration roles persist the selected role and explain approval requ
         const registration = route.request().postDataJSON();
         submittedRole = registration.role;
         submittedFarmName = registration.farm?.farmName ?? '';
+        submittedPhone = registration.phone;
         await route.fulfill({
           status: 201,
           contentType: 'application/json',
           body: JSON.stringify({
             success: true,
-            verification: { emailSent: true, phoneCodeSent: true },
+            verification: { emailSent: true },
           }),
         });
       });
@@ -103,7 +105,6 @@ test('all registration roles persist the selected role and explain approval requ
       await expect(page.getByLabel('Register as')).toHaveValue(role);
       await page.getByLabel('Full name').fill(`${role} Applicant`);
       await page.getByLabel('Email').fill(`${role}@example.test`);
-      await page.getByLabel('Phone').fill('9123456789');
       if (role === 'farmer') {
         await page.getByLabel('Farm name').fill('Applicant Farm');
         await page.getByLabel('Village').fill('Test Village');
@@ -116,12 +117,11 @@ test('all registration roles persist the selected role and explain approval requ
       await page.getByRole('button', { name: 'Create account' }).click();
       await expect(page).toHaveURL(/\/verify-account$/);
       expect(submittedRole).toBe(role);
+      expect(submittedPhone).toBeUndefined();
       if (role === 'farmer') expect(submittedFarmName).toBe('Applicant Farm');
       await expect(page.getByLabel('Account email')).toHaveValue(`${role}@example.test`);
-      await expect(page.getByText('Email address', { exact: true })).toBeVisible();
-      await expect(page.getByText('Phone number', { exact: true })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Resend verification email' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Resend SMS code' })).toBeVisible();
+      await expect(page.getByText('Email verification', { exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: /Resend available in/ })).toBeVisible();
       expect(await page.evaluate(() => localStorage.getItem('agriconnect_session'))).toBeNull();
     } finally {
       await context.close();
@@ -129,7 +129,7 @@ test('all registration roles persist the selected role and explain approval requ
   }
 });
 
-test('verification link and SMS code must both succeed before the account is complete', async ({ browser }) => {
+test('email verification link completes account verification', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   try {
     await context.route(`${apiOrigin}/api/auth/verification/email/confirm`, async (route) => {
@@ -137,30 +137,48 @@ test('verification link and SMS code must both succeed before the account is com
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, email: 'buyer@example.test', emailVerified: true, phoneVerified: false }),
-      });
-    });
-    await context.route(`${apiOrigin}/api/auth/verification/phone/confirm`, async (route) => {
-      expect(route.request().postDataJSON()).toEqual({ email: 'buyer@example.test', code: '123456' });
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, emailVerified: true, phoneVerified: true }),
+        body: JSON.stringify({ success: true, email: 'buyer@example.test', emailVerified: true }),
       });
     });
     await context.route('**/socket.io/**', (route) => route.abort());
 
     const page = await context.newPage();
     await page.goto('/verify-account#token=email-verification-token-12345678901234567890');
-    await expect(page.getByText('Your email address is verified.')).toBeVisible();
-    await page.getByLabel('Account email').fill('buyer@example.test');
-    await page.getByLabel('SMS verification code').fill('123456');
-    await page.getByRole('button', { name: 'Verify phone' }).click();
-    await expect(page.getByRole('heading', { name: 'Account verified.' })).toBeVisible();
+    await expect(page.getByText('Your email address is verified and your account is ready.')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Email verified.' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Continue to sign in' })).toBeVisible();
   } finally {
     await context.close();
   }
+});
+
+test('unverified login offers a non-enumerating email resend action', async ({ page }) => {
+  await page.route(`${apiOrigin}/api/auth/login`, (route) => route.fulfill({
+    status: 403,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: false,
+      code: 'EMAIL_NOT_VERIFIED',
+      message: 'Verify your email address before signing in.',
+    }),
+  }));
+  await page.route(`${apiOrigin}/api/auth/verification/email/resend`, (route) => route.fulfill({
+    status: 202,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      message: 'If an account needs verification, a link will be sent when email delivery is available.',
+    }),
+  }));
+  await page.route('**/socket.io/**', (route) => route.abort());
+  await page.goto('/login');
+  await page.getByLabel('Email').fill('buyer@example.test');
+  await page.getByLabel('Password').fill('LongPassword123!');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('link', { name: 'Continue to email verification' })).toBeVisible();
+  await page.getByRole('button', { name: 'Resend verification email' }).click();
+  await expect(page.getByRole('status')).toContainText('If an account needs verification');
+  await expect(page.getByRole('button', { name: /Resend available in/ })).toBeDisabled();
 });
 
 test('farmer listings, orders, payouts, and insights render the signed-in farmer data', async ({ browser }) => {

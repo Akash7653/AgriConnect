@@ -11,6 +11,7 @@ import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage';
 import { VerifyAccountPage } from '@/pages/VerifyAccountPage';
 import { DashboardRoute } from '@/pages/dashboard/DashboardRoute';
+import { PublicStorefrontPage } from '@/pages/PublicStorefrontPage';
 import { AdvisorChat } from '@/components/advisor/AdvisorChat';
 
 function AppRoutes() {
@@ -35,6 +36,7 @@ function AppRoutes() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/verify-account" element={<VerifyAccountPage />} />
+          <Route path="/shop" element={<PublicStorefrontPage />} />
           <Route path="/dashboard/*" element={<DashboardRoute />} />
           <Route path="*" element={<LandingPage />} />
         </Routes>

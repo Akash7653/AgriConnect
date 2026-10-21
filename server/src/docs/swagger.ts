@@ -36,13 +36,25 @@ export const swaggerDocument = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['name', 'email', 'password', 'role', 'phone'],
+                required: ['name', 'email', 'password'],
                 properties: {
                   name: { type: 'string' },
                   email: { type: 'string' },
                   password: { type: 'string' },
                   role: { type: 'string', enum: ['farmer', 'buyer', 'business', 'logistics'] },
-                  phone: { type: 'string' },
+                  phone: { type: 'string', description: 'Optional contact phone number; email verification is the only registration verification.' },
+                },
+              },
+              '/api/auth/verification/email/resend': {
+                post: {
+                  summary: 'Resend a verification email without revealing whether an account exists',
+                  responses: { 202: { description: 'Request accepted' } },
+                },
+              },
+              '/api/auth/verification/email/confirm': {
+                post: {
+                  summary: 'Consume a one-time email verification token',
+                  responses: { 200: { description: 'Email verified' }, 400: { description: 'Invalid or expired token' } },
                 },
               },
             },

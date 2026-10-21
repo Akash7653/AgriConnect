@@ -68,7 +68,7 @@ const UserSchema = new Schema<IUser>(
       state: { type: String, trim: true },
       pinCode: { type: String, trim: true },
     },
-    phone: { type: String, required: true, trim: true },
+    phone: { type: String, required: false, default: '', trim: true },
     language: { type: String, enum: ['en', 'te', 'hi'], default: 'en' },
     isVerified: { type: Boolean, default: false },
     status: {

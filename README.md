@@ -75,6 +75,8 @@ Customer Final Payable:     104,000 paise  (₹1,040.00)
 | Admin | Review requested roles, monitor platform data, advance administrative order states, and assign or reassign eligible deliveries. |
 | Applicant awaiting approval | Has buyer-level access until an admin approves the requested Farmer, Business, or Logistics role. The applicant must sign in again after approval to refresh the role in the client session. |
 
+Guests can browse the public marketing page at `/` and the live catalogue at `/shop`; signing in is required to check out. A guest cart is carried into the buyer account at sign-in. Buyers get Home, Categories, Orders, and Cart in the mobile bottom navigation, while other roles keep their role-specific dashboard navigation.
+
 ### Order lifecycle
 
 - Checkout validates catalogue stock, serviceability, and prices on the server. Razorpay orders reserve inventory while payment is pending; COD orders are not marked paid until cash collection is confirmed at delivery.
@@ -121,6 +123,15 @@ deployed frontend origin (for example,
 minutes and can be used once. The API returns the same request message whether
 or not an account exists for the submitted email. Never put Resend credentials
 in `VITE_*` variables.
+
+### Email verification
+
+New accounts must verify their email before signing in. Configure backend-only
+`RESEND_API_KEY`, `RESEND_FROM_EMAIL` (from a domain verified in Resend), and
+`FRONTEND_URL` on Render. For production, set `FRONTEND_URL` to
+`https://agri-connect-seven-snowy.vercel.app`. A phone number is optional and is
+not part of account verification. See [deployment setup](./docs/DEPLOYMENT.md)
+for cooldowns, sender restrictions, and safe legacy-account defaults.
 
 ### Destructive production data reset
 
@@ -313,7 +324,7 @@ AgriConnect features a world-class, cinematic 3D digital experience:
 - **3D Hero Scene**: Procedural green rolling hills, terraced crop rows, animated windmill with rotating blades, meandering river with specular reflections, floating produce with mouse parallax, and floating golden pollen particles.
 - **Interactive Supply Chain Transformation**: Interactive 3D scene comparing traditional fragmented mandi chains (5 middlemen, 40% loss) vs AgriConnect's direct connected network.
 - **Freshness in Motion**: 360° interactive 3D produce inspector for Alphonso Mango, Heirloom Tomato, Crisp Pepper, and Sharbati Wheat with GI-tag quality metadata.
-- **Mobile Down-Nav**: Liquid Glass bottom navigation bar visible on mobile viewports with quick access to Home, Market, Cart (with live badge), B2B, and Profile.
+- **Mobile buyer navigation**: A fixed, safe-area-aware bottom bar provides Home, Categories, Orders, and Cart with the current cart count. The account/profile menu remains in the top header; farmers, administrators, and delivery partners use role-specific dashboard navigation.
 
 ---
 

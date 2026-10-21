@@ -64,11 +64,11 @@ export async function authenticateToken(req: AuthRequest, res: Response, next: N
       return;
     }
 
-    if (!user.emailVerified || !user.phoneVerified) {
+    if (!user.emailVerified) {
       res.status(403).json({
         success: false,
-        code: 'CONTACT_VERIFICATION_REQUIRED',
-        message: 'Verify your email address and phone number before continuing.',
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Verify your email address before continuing.',
       });
       return;
     }

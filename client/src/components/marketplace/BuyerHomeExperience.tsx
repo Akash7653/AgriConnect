@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, ChevronDown, MapPin, Search, ShoppingCart, Sprout, X } from 'lucide-react';
 import { LocationSelector } from '@/components/marketplace/LocationSelector';
 import { ProductCard } from '@/components/marketplace/ProductCard';
@@ -34,6 +34,7 @@ export function BuyerHomeExperience() {
   const { session, updateAddress } = useAuth();
   const { totalItems } = useCart();
   const navigate = useNavigate();
+  const routeLocation = useLocation();
   const [products, setProducts] = useState<CropProduct[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -66,6 +67,19 @@ export function BuyerHomeExperience() {
   const [locationError, setLocationError] = useState('');
   const [serviceabilityMessage, setServiceabilityMessage] = useState('');
   const [savingLocation, setSavingLocation] = useState(false);
+
+  useEffect(() => {
+    const state = routeLocation.state;
+    if (
+      typeof state === 'object' &&
+      state !== null &&
+      'openDeliveryLocation' in state &&
+      state.openDeliveryLocation === true
+    ) {
+      setLocationOpen(true);
+      navigate(routeLocation.pathname, { replace: true, state: null });
+    }
+  }, [navigate, routeLocation.pathname, routeLocation.state]);
 
   const user = session?.user;
   const address = user?.address;

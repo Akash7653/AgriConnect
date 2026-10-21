@@ -24,8 +24,8 @@ async function bootstrapAdmin() {
   const user = await User.findOne({ email });
   if (!user) throw new Error('Bootstrap account was not found. Register it first.');
   if (user.role === USER_ROLES.ADMIN) throw new Error('Account is already an administrator.');
-  if (!user.emailVerified || !user.phoneVerified) {
-    throw new Error('Bootstrap account must complete email and phone verification first.');
+  if (!user.emailVerified) {
+    throw new Error('Bootstrap account must complete email verification first.');
   }
 
   const previousRole = user.role;
