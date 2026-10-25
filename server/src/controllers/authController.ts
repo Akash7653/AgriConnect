@@ -9,6 +9,8 @@ import { signToken, AuthRequest } from '../middleware/auth.js';
 import { USER_ROLES } from '../config/constants.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { SEEDED_DEMO_ACCOUNT_EMAILS } from '../config/demoAccounts.js';
+import { PendingSignup } from '../models/PendingSignup.js';
+import { createPendingSignup, checkSignupOtp, resendPendingSignupOtp, restoreClaimedOtp, SignupOtpError } from '../services/signupOtp.js';
 import {
   isVerificationDeliveryConfigured,
   sendEmailVerification,
@@ -17,7 +19,7 @@ import {
 } from '../services/accountVerification.js';
 
 export const registerSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
+  name: z.string().trim().min(2, 'Name must be at least 2 characters').max(100),
   email: z.string().email('Invalid email address').max(254),
   password: z.string().min(12, 'Password must be at least 12 characters').max(128),
   phone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/, 'Invalid phone number').optional(),
@@ -60,6 +62,10 @@ const verificationEmailSchema = z.object({
 const verificationTokenSchema = z.object({
   token: z.string().min(32).max(128),
 }).strict();
+const verifyOtpSchema = z.object({
+  email: z.string().email().max(254),
+  otp: z.string().regex(/^\d{6}$/, 'Enter the six-digit verification code.'),
+}).strict();
 
 const profileUpdateSchema = z.object({
   name: z.string().min(2).max(100).optional(),
@@ -77,91 +83,54 @@ const profileUpdateSchema = z.object({
 export async function register(req: Request, res: Response): Promise<void> {
   try {
     const data = registerSchema.parse(req.body);
-    if (!isVerificationDeliveryConfigured()) {
-      res.status(503).json({
-        success: false,
-        code: 'VERIFICATION_NOT_CONFIGURED',
-        message: 'Email verification is not configured. Please try again later.',
-      });
+    const email = data.email.trim().toLowerCase();
+    const existingUser = await User.findOne({ email });
+    if (existingUser?.emailVerified) {
+      res.status(409).json({ success: false, code: 'EMAIL_ALREADY_REGISTERED', message: 'An account with this email already exists. Please sign in.' });
       return;
     }
 
-    const existingUser = await User.findOne({ email: data.email.toLowerCase() });
-    if (existingUser) {
-      res.status(400).json({ success: false, message: 'An account with this email already exists' });
+    if (existingUser && !await bcrypt.compare(data.password, existingUser.passwordHash)) {
+      res.status(409).json({ success: false, code: 'EMAIL_ALREADY_REGISTERED', message: 'An account with this email already exists. Please sign in or request verification.' });
       return;
     }
 
-    const salt = await bcrypt.genSalt(12);
-    const passwordHash = await bcrypt.hash(data.password, salt);
-
-    const user = await User.create({
-      name: data.name,
-      email: data.email.toLowerCase(),
+    const passwordHash = existingUser?.passwordHash
+      ?? await bcrypt.hash(data.password, await bcrypt.genSalt(12));
+    await createPendingSignup({
+      email,
+      name: existingUser?.name ?? data.name,
       passwordHash,
-      role: USER_ROLES.BUYER,
-      ...(data.role !== USER_ROLES.BUYER ? { requestedRole: data.role } : {}),
-      ...(data.role === USER_ROLES.FARMER && data.farm ? { requestedFarm: data.farm } : {}),
-      phone: data.phone ?? '',
-      language: data.language,
-      isVerified: false,
-      emailVerified: false,
-      status: data.role === USER_ROLES.BUYER ? 'active' : 'pending_verification',
+      phone: existingUser?.phone ?? data.phone ?? '',
+      role: existingUser?.role === USER_ROLES.ADMIN ? USER_ROLES.BUYER : existingUser?.role ?? USER_ROLES.BUYER,
+      ...(!existingUser && data.role !== USER_ROLES.BUYER ? { requestedRole: data.role } : {}),
+      ...(existingUser?.requestedRole ? { requestedRole: existingUser.requestedRole } : {}),
+      ...(!existingUser && data.role === USER_ROLES.FARMER && data.farm ? { requestedFarm: data.farm } : {}),
+      ...(existingUser?.requestedFarm ? { requestedFarm: existingUser.requestedFarm } : {}),
+      language: existingUser?.language ?? data.language,
+      ...(existingUser ? { legacyUserId: existingUser._id } : {}),
     });
 
-    let emailSent = false;
-    let emailDeliveryMessage = 'Account created, but the verification email could not be sent. Use the resend option to try again.';
-    try {
-      await sendEmailVerification(user._id.toString());
-      emailSent = true;
-      emailDeliveryMessage = 'Account created. Check your email for a verification link before signing in.';
-    } catch (error) {
-      if (!(error instanceof VerificationError)) throw error;
-      console.warn('[auth] Registration verification email was not sent', { category: error.category });
-    }
-
-    if (user.role === USER_ROLES.BUYER) {
-      await BuyerProfile.create({ userId: user._id, buyerType: 'household', deliveryAddresses: [] });
-    }
-
-    await AuditLog.create({
-      action: 'USER_REGISTERED',
-      userId: user._id,
-      userName: user.name,
-      role: user.role,
-      details: { email: user.email, role: user.role, requestedRole: user.requestedRole },
-      ipAddress: req.ip,
-    });
-
-    res.status(emailSent ? 201 : 202).json({
+    res.status(202).json({
       success: true,
-      message: emailDeliveryMessage,
-      verification: { emailSent },
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        requestedRole: user.requestedRole,
-        requestedFarm: user.requestedFarm,
-        status: user.status,
-        phone: user.phone,
-        language: user.language,
-        isVerified: user.isVerified,
-        emailVerified: user.emailVerified,
-        address: user.address,
-      },
+      message: 'Verification code sent. Enter the six-digit code from your email to finish creating your account.',
+      email,
+      otpSent: true,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ success: false, message: error.issues[0]?.message ?? 'Check the registration details and try again.' });
       return;
     }
+    if (error instanceof SignupOtpError) {
+      res.status(error.statusCode).json({ success: false, code: error.code, message: error.message, retryable: error.code === 'OTP_DELIVERY_FAILED' });
+      return;
+    }
     if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
       res.status(400).json({ success: false, message: 'An account with this email already exists.' });
       return;
     }
-    console.error('[auth] Registration failed', { category: 'registration_processing_error' });
+    console.error('[auth] Signup could not be processed', { category: 'signup_processing_error' });
     res.status(500).json({ success: false, message: 'Registration could not be completed. Please try again.' });
   }
 }
@@ -177,10 +146,18 @@ export async function login(req: Request, res: Response): Promise<void> {
 
     const user = await User.findOne({ email: data.email.toLowerCase() });
     if (!user) {
+      const pending = await PendingSignup.findOne({ email: data.email.toLowerCase() }).select('+passwordHash');
+      if (pending && await bcrypt.compare(data.password, pending.passwordHash)) {
+        res.status(403).json({
+          success: false,
+          code: 'EMAIL_NOT_VERIFIED',
+          message: 'Please verify your email with the six-digit code before signing in.',
+        });
+        return;
+      }
       res.status(401).json({ success: false, message: 'Invalid email or password' });
       return;
     }
-
     const isMatch = await bcrypt.compare(data.password, user.passwordHash);
     if (!isMatch) {
       res.status(401).json({ success: false, message: 'Invalid email or password' });
@@ -232,6 +209,155 @@ export async function login(req: Request, res: Response): Promise<void> {
     });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function verifySignupOtp(req: Request, res: Response): Promise<void> {
+  const parsed = verifyOtpSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, code: 'OTP_INVALID', message: 'Enter the six-digit verification code.' });
+    return;
+  }
+  const email = parsed.data.email.trim().toLowerCase();
+  try {
+    const checked = await checkSignupOtp(email, parsed.data.otp);
+    if ('code' in checked || !checked.pending) {
+      const code = 'code' in checked ? checked.code : 'OTP_INVALID';
+      const message = code === 'OTP_EXPIRED'
+        ? 'This code has expired. Request a new verification code.'
+        : code === 'OTP_ATTEMPTS_EXCEEDED'
+          ? 'Too many incorrect attempts. Request a new code to continue.'
+          : 'That verification code is incorrect. Check it and try again.';
+      res.status(400).json({ success: false, code, message });
+      return;
+    }
+
+    const pending = checked.pending;
+    let user;
+    if (pending.legacyUserId) {
+      user = await User.findOneAndUpdate(
+        { _id: pending.legacyUserId, email, emailVerified: false },
+        { $set: { emailVerified: true }, $unset: { emailVerificationTokenHash: 1, emailVerificationExpiresAt: 1, emailVerificationLastSentAt: 1 } },
+        { new: true },
+      );
+      if (!user) {
+        user = await User.findOne({ email });
+        if (!user?.emailVerified) {
+          res.status(409).json({ success: false, code: 'ACCOUNT_UNAVAILABLE', message: 'This signup could not be completed. Please contact support.' });
+          return;
+        }
+      }
+    } else {
+      try {
+        user = await User.create({
+          name: pending.name,
+          email,
+          passwordHash: pending.passwordHash,
+          role: pending.role,
+          ...(pending.requestedRole ? { requestedRole: pending.requestedRole } : {}),
+          ...(pending.requestedFarm ? { requestedFarm: pending.requestedFarm } : {}),
+          phone: pending.phone ?? '',
+          language: pending.language,
+          isVerified: false,
+          emailVerified: true,
+          status: pending.requestedRole ? 'pending_verification' : 'active',
+        });
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
+          await PendingSignup.deleteOne({ _id: pending._id });
+          res.status(409).json({ success: false, code: 'EMAIL_ALREADY_REGISTERED', message: 'An account with this email already exists. Please sign in.' });
+          return;
+        }
+        await restoreClaimedOtp(pending, parsed.data.otp);
+        throw error;
+      }
+    }
+
+    await PendingSignup.deleteOne({ _id: pending._id });
+    if (user.role === USER_ROLES.BUYER) {
+      try {
+        await BuyerProfile.updateOne(
+          { userId: user._id },
+          { $setOnInsert: { userId: user._id, buyerType: 'household', deliveryAddresses: [] } },
+          { upsert: true },
+        );
+      } catch {
+        console.error('[auth] Buyer profile initialization failed', { category: 'buyer_profile_write_error' });
+      }
+    }
+    try {
+      await AuditLog.create({
+        action: 'USER_SIGNUP_VERIFIED',
+        userId: user._id,
+        userName: user.name,
+        role: user.role,
+        details: { requestedRole: user.requestedRole },
+        ipAddress: req.ip,
+      });
+    } catch {
+      console.error('[auth] Verified signup audit write failed', { category: 'audit_write_error' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Email verified. You are now signed in.',
+      token: signToken(user),
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        requestedRole: user.requestedRole,
+        requestedFarm: user.requestedFarm,
+        status: user.status,
+        phone: user.phone,
+        language: user.language,
+        isVerified: user.isVerified,
+        emailVerified: user.emailVerified,
+        address: user.address,
+      },
+    });
+  } catch (error) {
+    if (error instanceof SignupOtpError) {
+      res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
+      return;
+    }
+    console.error('[auth] Signup OTP verification failed', { category: 'otp_verification_processing_error' });
+    res.status(500).json({ success: false, code: 'OTP_VERIFICATION_FAILED', message: 'Verification could not be completed. Please retry.' });
+  }
+}
+
+export async function resendSignupOtp(req: Request, res: Response): Promise<void> {
+  const parsed = verificationEmailSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+    return;
+  }
+  try {
+    await resendPendingSignupOtp(parsed.data.email.trim().toLowerCase());
+    res.status(202).json({
+      success: true,
+      message: 'If a signup for this email is waiting for verification, a new code will be sent when eligible.',
+    });
+  } catch (error) {
+    if (error instanceof SignupOtpError) {
+      if (error.code === 'OTP_COOLDOWN' || error.code === 'OTP_RESEND_LIMIT') {
+        res.status(202).json({
+          success: true,
+          message: 'If a signup for this email is waiting for verification, a new code will be sent when eligible.',
+        });
+        return;
+      }
+      res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+        retryable: error.code === 'OTP_DELIVERY_FAILED',
+      });
+      return;
+    }
+    console.error('[auth] OTP resend could not be processed', { category: 'otp_resend_processing_error' });
+    res.status(503).json({ success: false, code: 'OTP_RESEND_UNAVAILABLE', message: 'Verification is temporarily unavailable. Please retry.' });
   }
 }
 

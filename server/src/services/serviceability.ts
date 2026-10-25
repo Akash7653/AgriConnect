@@ -8,7 +8,7 @@ export interface ServiceabilityAddress {
 
 export interface ServiceabilityResult {
   configured: boolean;
-  serviceable: boolean;
+  serviceable: boolean | null;
   message: string;
   zone?: Pick<
     IServiceZone,
@@ -26,7 +26,7 @@ export async function checkServiceability(address: ServiceabilityAddress): Promi
   if (configuredZoneCount === 0) {
     return {
       configured: false,
-      serviceable: true,
+      serviceable: null,
       message: 'Serviceability is not configured for this deployment yet.',
     };
   }

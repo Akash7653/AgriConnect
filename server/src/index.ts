@@ -44,6 +44,9 @@ import { startPendingOrderExpiryJob } from './jobs/expirePendingOrders.js';
 import { startEmailOutboxJob } from './jobs/emailOutbox.js';
 import { startAutomaticPayoutJob } from './jobs/automaticPayouts.js';
 import { getAllowedClientOrigins } from './config/clientOrigins.js';
+import { authenticateToken, requireRole } from './middleware/auth.js';
+import { USER_ROLES } from './config/constants.js';
+import { emailProviderHealth, checkEmailProviderStartup } from './services/otpEmail.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -145,6 +148,9 @@ app.get('/api/health', (_req, res) => {
     razorpay: razorpayMode,
   });
 });
+app.get('/api/health/email', authenticateToken, requireRole(USER_ROLES.ADMIN), (_req, res) => {
+  res.json({ success: true, email: emailProviderHealth() });
+});
 // Root endpoint – simple health/info response
 app.get('/', (_req, res) => {
   res.json({
@@ -177,6 +183,7 @@ const PORT = process.env.PORT || 5000;
 
 async function bootstrap() {
   try {
+    checkEmailProviderStartup();
     await connectDB();
     if (process.env.NODE_ENV !== 'production') {
       await seedDatabaseIfEmpty();

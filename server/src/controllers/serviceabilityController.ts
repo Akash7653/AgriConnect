@@ -5,7 +5,7 @@ import { checkServiceability } from '../services/serviceability.js';
 const serviceabilityQuerySchema = z.object({
   city: z.string().min(2),
   state: z.string().min(2),
-  pinCode: z.string().min(5),
+  pinCode: z.string().regex(/^\d{6}$/, 'PIN code must contain six digits.'),
 });
 
 export async function getServiceability(req: Request, res: Response): Promise<void> {

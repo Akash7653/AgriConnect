@@ -8,13 +8,18 @@ import {
   resetPassword,
   resendEmailVerification,
   confirmEmailVerification,
+  verifySignupOtp,
+  resendSignupOtp,
 } from '../controllers/authController.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
 
 router.post('/register', register);
+router.post('/signup', register);
 router.post('/login', login);
+router.post('/verify-otp', verifySignupOtp);
+router.post('/resend-otp', resendSignupOtp);
 router.post('/password-reset/request', requestPasswordReset);
 router.post('/password-reset/confirm', resetPassword);
 router.post('/verification/email/resend', resendEmailVerification);

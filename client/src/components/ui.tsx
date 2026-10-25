@@ -64,7 +64,7 @@ export function Input({ label, error, icon, className, id, ...rest }: InputProps
             'w-full rounded-xl border bg-white/60 px-4 py-3 text-forest placeholder:text-charcoal/40 transition-colors dark-mode-input',
             'focus:outline-none focus:ring-2 focus:ring-agri-emerald focus:border-agri-emerald',
             error ? 'border-red-400' : 'border-forest/15',
-            icon && 'pl-11',
+            icon ? 'pl-11' : false,
             className
           )}
           {...rest}

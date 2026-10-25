@@ -75,8 +75,9 @@ test('location fills checkout delivery fields and offers cash on delivery', asyn
     await page.getByRole('button', { name: 'Add Fresh Tomatoes to cart' }).click();
     await page.getByRole('button', { name: /^Cart/ }).first().click();
     await page.getByRole('button', { name: 'Continue to payment' }).click();
-    await page.getByRole('button', { name: 'Use my current location' }).click();
-    await expect(page.getByText(/Delivery location updated to Farm Road/)).toBeVisible();
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await page.getByRole('button', { name: 'Confirm and save address' }).click();
+    await expect(page.getByText(/Delivery address confirmed: Farm Road/)).toBeVisible();
 
     await expect(page.getByLabel('Full name')).toHaveValue('Checkout Buyer');
     await expect(page.getByLabel('Phone')).toHaveValue('9123456789');

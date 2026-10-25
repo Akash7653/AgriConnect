@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,10 +17,24 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import RazorpayCheckout from 'react-native-razorpay';
-import { ApiError, apiRequest, getApiError, type Product, type Session } from './src/api';
+import { ApiError, apiRequest, getApiError, type Product, type Session } from './native/src/api';
 
 const SESSION_KEY = 'agriconnect_session';
 const green = '#246B45';
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Location request timed out.')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
 
 interface Address {
   recipientName: string;
@@ -50,6 +64,9 @@ export default function App() {
   const [screen, setScreen] = useState<'shop' | 'cart' | 'orders'>('shop');
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [detectedAddress, setDetectedAddress] = useState<Partial<Address> & { displayName?: string; latitude?: number; longitude?: number } | null>(null);
+  const [detectedCoordinates, setDetectedCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
   const [error, setError] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -57,7 +74,11 @@ export default function App() {
   const [phone, setPhone] = useState('');
   const [registering, setRegistering] = useState(false);
   const [verificationPending, setVerificationPending] = useState(false);
+  const [verificationFromSignup, setVerificationFromSignup] = useState(false);
   const [verificationMessage, setVerificationMessage] = useState('');
+  const [otp, setOtp] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const otpInputs = useRef<Array<TextInput | null>>([]);
   const [address, setAddress] = useState<Address>({
     recipientName: '',
     phone: '',
@@ -76,6 +97,12 @@ export default function App() {
       .catch((storageError: unknown) => setError(getApiError(storageError)))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   async function loadProducts() {
     setBusy(true);
@@ -128,20 +155,19 @@ export default function App() {
     try {
       if (registering) {
         const result = await apiRequest<{
-          user: { email: string };
-          verification: { emailSent: boolean };
-        }>('/auth/register', {
+          email: string;
+          otpSent: boolean;
+        }>('/auth/signup', {
           method: 'POST',
           body: JSON.stringify({ name, email, password, ...(phone.trim() ? { phone: phone.trim() } : {}), role: 'buyer' }),
         });
-        setEmail(result.user.email);
+        setEmail(result.email);
         setRegistering(false);
         setVerificationPending(true);
-        setVerificationMessage(
-          result.verification.emailSent
-            ? 'Account created. Open the verification link sent to your email before signing in.'
-            : 'Account created, but the verification email could not be sent. Retry below.'
-        );
+        setVerificationFromSignup(true);
+        setOtp('');
+        setResendCooldown(result.otpSent ? 60 : 0);
+        setVerificationMessage('Enter the six-digit code sent to your email. It expires in 10 minutes.');
       } else {
         const result = await apiRequest<Session>('/auth/login', {
           method: 'POST',
@@ -152,6 +178,14 @@ export default function App() {
     } catch (authError) {
       if (authError instanceof ApiError && authError.code === 'EMAIL_NOT_VERIFIED') {
         setVerificationPending(true);
+        setVerificationFromSignup(false);
+        setOtp('');
+      } else if (authError instanceof ApiError && authError.code === 'OTP_DELIVERY_FAILED' && registering) {
+        setRegistering(false);
+        setVerificationPending(true);
+        setVerificationFromSignup(true);
+        setResendCooldown(0);
+        setVerificationMessage('We could not send the code. Retry below.');
       }
       setError(getApiError(authError));
     } finally {
@@ -164,11 +198,12 @@ export default function App() {
     setError('');
     setVerificationMessage('');
     try {
-      const result = await apiRequest<{ message: string }>('/auth/verification/email/resend', {
+      const result = await apiRequest<{ message: string }>('/auth/resend-otp', {
         method: 'POST',
         body: JSON.stringify({ email }),
       });
       setVerificationMessage(result.message);
+      setResendCooldown(60);
     } catch (verificationError) {
       setError(getApiError(verificationError));
     } finally {
@@ -176,26 +211,109 @@ export default function App() {
     }
   }
 
+  function updateOtpDigit(index: number, value: string) {
+    const digits = value.replace(/\D/g, '');
+    const next = otp.split('');
+    if (digits.length > 1) {
+      digits.slice(0, 6 - index).split('').forEach((digit, offset) => { next[index + offset] = digit; });
+    } else {
+      next[index] = digits;
+    }
+    const nextOtp = next.join('').slice(0, 6);
+    setOtp(nextOtp);
+    if (digits && index < 5) otpInputs.current[Math.min(index + digits.length, 5)]?.focus();
+  }
+
+  async function verifySignupCode() {
+    if (otp.length !== 6) {
+      setError('Enter all six digits of the verification code.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const result = await apiRequest<Session>('/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim().toLowerCase(), otp }),
+      });
+      await persistSession(result);
+      setVerificationPending(false);
+      setOtp('');
+      setVerificationMessage('');
+    } catch (verifyError) {
+      setError(getApiError(verifyError));
+      setOtp('');
+      otpInputs.current[0]?.focus();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function suggestAddress() {
     setError('');
+    setDetectedAddress(null);
+    setDetectedCoordinates(null);
+    setLocationBusy(true);
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') {
         setError('Location permission denied. You can enter the delivery address manually.');
         return;
       }
-      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const reverse = await apiRequest<{ address: { city: string; district: string; state: string; pinCode: string } }>(
-        '/location/reverse-geocode',
-        {
-          method: 'POST',
-          body: JSON.stringify({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
-        }
+      const lastKnownPosition = await Location.getLastKnownPositionAsync({ maxAge: 300_000, requiredAccuracy: 150 });
+      const position = lastKnownPosition ?? await withTimeout(
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+          mayShowUserSettingsDialog: true,
+        }),
+        20_000,
       );
-      setAddress((current) => ({ ...current, ...reverse.address }));
+      setDetectedCoordinates({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+      const reverseController = new AbortController();
+      const reverseTimeout = setTimeout(() => reverseController.abort(), 15_000);
+      let reverse: { address: { city: string; district: string; state: string; pinCode: string; displayName: string; line1?: string } };
+      try {
+        reverse = await apiRequest(
+          '/location/reverse-geocode',
+          {
+            method: 'POST',
+            body: JSON.stringify({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+            signal: reverseController.signal,
+          }
+        );
+      } finally {
+        clearTimeout(reverseTimeout);
+      }
+      setDetectedAddress({
+        city: reverse.address.city,
+        district: reverse.address.district,
+        state: reverse.address.state,
+        pinCode: reverse.address.pinCode,
+        addressLine1: reverse.address.line1 || reverse.address.displayName,
+        displayName: reverse.address.displayName,
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      setError('Location found. Review and confirm the delivery address below.');
     } catch (locationError) {
-      setError(`${getApiError(locationError)} You can enter the delivery address manually.`);
+      const message = locationError instanceof Error ? locationError.message.toLowerCase() : '';
+      setError(message.includes('timed out')
+        ? 'Location detection timed out. Try again or enter your address manually.'
+        : 'Couldn’t fetch your address automatically. Enter your PIN code and locality to continue.');
+    } finally {
+      setLocationBusy(false);
     }
+  }
+
+  function confirmDetectedAddress() {
+    if (!detectedAddress?.city || !detectedAddress.state || !detectedAddress.district || !/^\d{6}$/.test(detectedAddress.pinCode || '')) {
+      setError('Enter a valid six-digit PIN code and complete the address before confirming.');
+      return;
+    }
+    setAddress((current) => ({ ...current, ...detectedAddress }));
+    setDetectedAddress(null);
+    setDetectedCoordinates(null);
+    setError('Delivery address confirmed. Review the fields before checkout.');
   }
 
   async function checkout() {
@@ -272,7 +390,7 @@ export default function App() {
             <>
               <Text style={styles.heading}>Verify your account</Text>
               <Text style={styles.muted}>
-                Open the one-time verification link sent to your email. Check your spam folder if it does not arrive.
+                Enter the six-digit code sent to your email. It expires in 10 minutes. Check your spam folder if it does not arrive.
               </Text>
               <TextInput
                 accessibilityLabel="Account email"
@@ -283,11 +401,38 @@ export default function App() {
                 value={email}
                 onChangeText={setEmail}
               />
+              <View style={styles.otpRow}>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <TextInput
+                    key={index}
+                    ref={(element) => { otpInputs.current[index] = element; }}
+                    accessibilityLabel={`Verification digit ${index + 1}`}
+                    keyboardType="number-pad"
+                    autoComplete={index === 0 ? 'one-time-code' : 'off'}
+                    textContentType={index === 0 ? 'oneTimeCode' : 'none'}
+                    maxLength={index === 0 ? 6 : 1}
+                    value={otp[index] || ''}
+                    onChangeText={(value) => updateOtpDigit(index, value)}
+                    onKeyPress={({ nativeEvent }) => {
+                      if (nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
+                        const next = otp.split('');
+                        next[index - 1] = '';
+                        setOtp(next.join(''));
+                        otpInputs.current[index - 1]?.focus();
+                      }
+                    }}
+                    style={styles.otpInput}
+                  />
+                ))}
+              </View>
               {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
               {verificationMessage ? <Text accessibilityRole="alert" style={styles.notice}>{verificationMessage}</Text> : null}
               <View style={styles.verificationActions}>
-                <Pressable style={styles.secondaryButton} onPress={() => void resendVerificationEmail()} disabled={busy}>
-                  <Text style={styles.secondaryText}>Resend verification email</Text>
+                <Pressable style={styles.secondaryButton} onPress={() => void resendVerificationEmail()} disabled={busy || resendCooldown > 0}>
+                  <Text style={styles.secondaryText}>{resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}</Text>
+                </Pressable>
+                <Pressable style={styles.primaryButton} onPress={() => void verifySignupCode()} disabled={busy || otp.length !== 6}>
+                  {busy ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>Verify and continue</Text>}
                 </Pressable>
               </View>
               <Pressable
@@ -295,10 +440,13 @@ export default function App() {
                   setVerificationPending(false);
                   setVerificationMessage('');
                   setError('');
+                  setOtp('');
+                  setResendCooldown(0);
+                  if (verificationFromSignup) setRegistering(true);
                 }}
                 style={styles.linkButton}
               >
-                <Text style={styles.linkText}>Back to sign in</Text>
+                <Text style={styles.linkText}>Change email</Text>
               </Pressable>
             </>
           ) : (
@@ -428,10 +576,29 @@ export default function App() {
           <Text style={styles.price}>Subtotal: ₹{(cartTotal / 100).toFixed(2)}</Text>
           <Text style={styles.muted}>Delivery and final pricing are confirmed securely by the server.</Text>
           <Text style={styles.heading}>Delivery address</Text>
-          <Pressable style={styles.secondaryButton} onPress={() => void suggestAddress()}>
-            <Text style={styles.secondaryText}>Suggest address from my location</Text>
+          <Pressable style={styles.secondaryButton} onPress={() => void suggestAddress()} disabled={locationBusy}>
+            {locationBusy ? <ActivityIndicator color={green} /> : <Text style={styles.secondaryText}>Detect my location</Text>}
           </Pressable>
+          {detectedAddress ? (
+            <View style={styles.detectedAddress}>
+              <Text style={styles.productName}>Confirm delivery address</Text>
+              <Text style={styles.muted}>{detectedAddress.displayName || [detectedAddress.city, detectedAddress.state].filter(Boolean).join(', ')}</Text>
+              <TextInput
+                accessibilityLabel="Detected PIN code"
+                placeholder="Six-digit PIN code"
+                keyboardType="number-pad"
+                maxLength={6}
+                value={detectedAddress.pinCode || ''}
+                onChangeText={(pinCode) => setDetectedAddress((current) => current ? { ...current, pinCode: pinCode.replace(/\D/g, '') } : current)}
+                style={styles.input}
+              />
+              <Pressable style={styles.primaryButton} onPress={confirmDetectedAddress}>
+                <Text style={styles.primaryText}>Confirm address</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <Text style={styles.muted}>Location is optional. You can enter your address manually.</Text>
+          {detectedCoordinates && !detectedAddress ? <Text style={styles.muted}>Your coordinates were found; enter your locality and PIN code manually to continue.</Text> : null}
           {([
             ['recipientName', 'Recipient name'],
             ['phone', 'Phone'],
@@ -519,6 +686,8 @@ const styles = StyleSheet.create({
   linkText: { color: green, fontWeight: '600' },
   notice: { color: '#246B45', lineHeight: 20 },
   verificationActions: { gap: 10 },
+  otpRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 6, marginVertical: 8 },
+  otpInput: { flex: 1, minWidth: 0, height: 48, borderWidth: 1, borderColor: '#D5E2D8', borderRadius: 10, backgroundColor: 'white', textAlign: 'center', fontSize: 20, fontWeight: '700', color: '#163D2B' },
   cartButton: { borderRadius: 20, backgroundColor: green, paddingHorizontal: 16, paddingVertical: 10 },
   cartButtonText: { color: 'white', fontWeight: '700' },
   tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#D8E0D9' },
@@ -537,6 +706,7 @@ const styles = StyleSheet.create({
   empty: { color: '#66716A', padding: 20, textAlign: 'center', lineHeight: 22 },
   checkoutContent: { padding: 18, gap: 12, paddingBottom: 48 },
   cartRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E6EAE6' },
+  detectedAddress: { padding: 12, marginVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: '#CDE3D4', backgroundColor: 'white', gap: 8 },
   signOut: { padding: 14, alignItems: 'center' },
   error: { color: '#A72828', lineHeight: 20 },
   errorBox: { marginHorizontal: 16, marginTop: 12, padding: 12, backgroundColor: '#FFF0EF', borderRadius: 10, gap: 8 },

@@ -5,6 +5,7 @@ import { AuthLayout } from '@/components/auth/AuthLayout';
 import { Input } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
+import { ApiError, AuthService } from '@/services/api';
 
 function registrationRoleLabel(role: 'buyer' | 'farmer' | 'business' | 'logistics'): string {
   switch (role) {
@@ -38,10 +39,13 @@ export function RegisterPage() {
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [retryingOtp, setRetryingOtp] = useState(false);
+  const [otpDeliveryFailed, setOtpDeliveryFailed] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setOtpDeliveryFailed(false);
     if (!fullName || !email || !password) {
       setError('Please fill in all required fields.');
       return;
@@ -74,21 +78,36 @@ export function RegisterPage() {
         role,
         ...(role === 'farmer' ? { farm } : {}),
       });
-      showToast(
-        result.verification.emailSent
-          ? 'Account created. Check your email to verify your address.'
-          : 'Account created, but the verification email could not be sent. Retry from the verification page.',
-        result.verification.emailSent ? 'success' : 'error'
-      );
+      showToast('Signup saved temporarily. Check your email for the six-digit verification code.', 'success');
       navigate('/verify-account', {
-        state: { email: email.trim().toLowerCase(), verification: result.verification },
+        state: {
+          email: result.email,
+          otpSent: result.otpSent,
+          redirectTo: searchParams.get('redirect') || '/dashboard',
+        },
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed.';
       setError(message);
+      setOtpDeliveryFailed(err instanceof ApiError && err.code === 'OTP_DELIVERY_FAILED');
       showToast(message, 'error');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function retryOtpDelivery() {
+    setRetryingOtp(true);
+    setError('');
+    try {
+      await AuthService.resendOtp(email.trim().toLowerCase());
+      navigate('/verify-account', {
+        state: { email: email.trim().toLowerCase(), otpSent: true, redirectTo: searchParams.get('redirect') || '/dashboard' },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'We could not send your verification code. Please retry.');
+    } finally {
+      setRetryingOtp(false);
     }
   }
 
@@ -203,6 +222,16 @@ export function RegisterPage() {
         {error && (
           <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-600">
             {error}
+            {otpDeliveryFailed && (
+              <button
+                type="button"
+                onClick={() => void retryOtpDelivery()}
+                disabled={retryingOtp}
+                className="mt-2 block font-semibold underline disabled:opacity-50"
+              >
+                {retryingOtp ? 'Retrying…' : 'Retry sending verification code'}
+              </button>
+            )}
           </div>
         )}
 

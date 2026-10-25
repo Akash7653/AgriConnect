@@ -8,7 +8,7 @@ import { ProductsService } from '@/services/products';
 import { useCart } from '@/hooks/useCart';
 import { useToast } from '@/hooks/useToast';
 import { useAuth } from '@/hooks/useAuth';
-import { request } from '@/services/api';
+import { getLocationServiceability } from '@/services/location';
 import { PaymentService, playPaymentSuccessSound, type CheckoutPaymentMethod, type DeliveryAddress } from '@/services/payment';
 import { subscribeRealtime } from '@/services/realtime';
 import type { CropProduct, ProductCategory, User } from '@/types';
@@ -473,27 +473,24 @@ function CartDrawer({
       return;
     }
     const timeout = window.setTimeout(() => {
-      const params = new URLSearchParams({
+      getLocationServiceability({
         city: address.city.trim(),
         state: address.state.trim(),
         pinCode: address.pinCode.trim(),
-      });
-      request<{
-        configured: boolean;
-        serviceable: boolean;
-        zone?: { estimatedDeliveryDays?: number };
-      }>(`/serviceability?${params}`)
+      })
         .then((result) => {
           if (!active) return;
           if (!result.configured) {
-            setDeliveryEstimate('Delivery timing is not configured for this location.');
-          } else if (!result.serviceable) {
+            setDeliveryEstimate('We couldn’t confirm delivery to this location yet.');
+          } else if (result.serviceable === false) {
             setDeliveryEstimate('Delivery is not currently available for this PIN code.');
-          } else if (result.zone?.estimatedDeliveryDays) {
+          } else if (result.serviceable === true && result.zone?.estimatedDeliveryDays) {
             const days = result.zone.estimatedDeliveryDays;
             setDeliveryEstimate(`Estimated delivery within ${days} ${days === 1 ? 'day' : 'days'} after order confirmation. Timing may vary.`);
-          } else {
+          } else if (result.serviceable === true) {
             setDeliveryEstimate('Delivery is available, but an estimated delivery time is not configured.');
+          } else {
+            setDeliveryEstimate('We couldn’t confirm delivery to this location yet.');
           }
         })
         .catch(() => {

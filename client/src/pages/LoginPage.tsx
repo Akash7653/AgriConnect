@@ -62,7 +62,7 @@ export function LoginPage() {
     setResendingVerification(true);
     setVerificationNotice('');
     try {
-      const result = await AuthService.resendEmailVerification(email);
+      const result = await AuthService.resendOtp(email);
       setVerificationNotice(result.message);
       setResendCooldown(60);
     } catch (requestError) {
@@ -128,7 +128,13 @@ export function LoginPage() {
             {error}
             {needsVerification && (
               <div className="mt-2 space-y-2">
-                <Link to="/verify-account" state={{ email }} className="block font-semibold underline">Continue to email verification</Link>
+                <Link
+                  to="/verify-account"
+                  state={{ email, otpSent: false, redirectTo: searchParams.get('redirect') || '/dashboard' }}
+                  className="block font-semibold underline"
+                >
+                  Continue to email verification
+                </Link>
                 <button
                   type="button"
                   onClick={() => void resendVerification()}
@@ -140,7 +146,7 @@ export function LoginPage() {
                     ? 'Sending…'
                     : resendCooldown > 0
                       ? `Resend available in ${resendCooldown}s`
-                      : 'Resend verification email'}
+                      : 'Resend verification code'}
                 </button>
                 {verificationNotice && <p role="status" className="text-xs">{verificationNotice}</p>}
               </div>

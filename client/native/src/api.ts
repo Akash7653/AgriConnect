@@ -22,11 +22,13 @@ export class ApiError extends Error {
   }
 }
 
-const apiUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+const DEFAULT_API_URL = 'https://agriconnect-api-ajoq.onrender.com/api';
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+const apiUrl = (configuredApiUrl || DEFAULT_API_URL).replace(/\/+$/, '');
+const apiBaseUrl = /\/api$/i.test(apiUrl) ? apiUrl : `${apiUrl}/api`;
 
 export async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
-  if (!apiUrl) throw new Error('Set EXPO_PUBLIC_API_BASE_URL in mobile/.env to connect to AgriConnect.');
-  const response = await fetch(`${apiUrl.replace(/\/$/, '')}${path}`, {
+  const response = await fetch(`${apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

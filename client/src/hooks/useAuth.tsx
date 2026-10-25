@@ -3,7 +3,8 @@ import { AuthService, request } from '@/services/api';
 import type { AuthSession, User } from '@/types';
 
 interface SignUpResult {
-  verification: { emailSent: boolean };
+  email: string;
+  otpSent: boolean;
 }
 
 interface AuthContextValue {
@@ -12,6 +13,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isBackendConfigured: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  verifyOtp: (email: string, otp: string) => Promise<void>;
   signUp: (payload: {
     fullName: string;
     email: string;
@@ -51,9 +53,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         AuthService.persistSession(s);
         setSession(s);
       },
+      async verifyOtp(email, otp) {
+        const s = await AuthService.verifyOtp(email, otp);
+        AuthService.persistSession(s);
+        setSession(s);
+      },
       async signUp(payload) {
         const response = await AuthService.register(payload);
-        return { verification: response.verification };
+        return { email: response.email, otpSent: response.otpSent };
       },
       signOut() {
         AuthService.clearSession();

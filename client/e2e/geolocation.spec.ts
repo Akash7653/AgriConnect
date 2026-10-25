@@ -5,7 +5,14 @@ const apiOrigin = 'https://agriconnect-api-ajoq.onrender.com';
 async function prepareMarketplace(
   context: BrowserContext,
   reverseGeocodeStatus: number | (() => number) = 200,
-  initialAddress?: { street: string; villageOrCity: string; district: string; state: string; pinCode: string }
+  initialAddress?: { street: string; villageOrCity: string; district: string; state: string; pinCode: string },
+  reverseGeocodeAddress = {
+    city: 'Pune',
+    district: 'Pune',
+    state: 'Maharashtra',
+    pinCode: '411001',
+    displayName: 'Pune, Maharashtra',
+  }
 ) {
   await context.addInitScript((address) => {
     localStorage.setItem('agriconnect_session', JSON.stringify({
@@ -38,6 +45,7 @@ async function prepareMarketplace(
   }));
   await context.route('**/socket.io/**', (route) => route.abort());
   const profileUpdates: unknown[] = [];
+  let reverseGeocodeRequests = 0;
   await context.route(`${apiOrigin}/api/auth/profile`, async (route) => {
     profileUpdates.push(JSON.parse(route.request().postData() ?? '{}'));
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
@@ -48,6 +56,7 @@ async function prepareMarketplace(
     body: JSON.stringify({ configured: false, serviceable: false }),
   }));
   await context.route(`${apiOrigin}/api/location/reverse-geocode`, (route) => {
+    reverseGeocodeRequests += 1;
     const status = typeof reverseGeocodeStatus === 'function' ? reverseGeocodeStatus() : reverseGeocodeStatus;
     return route.fulfill({
       status,
@@ -55,7 +64,7 @@ async function prepareMarketplace(
       body: JSON.stringify(status === 200
         ? {
             success: true,
-            address: { city: 'Pune', district: 'Pune', state: 'Maharashtra', pinCode: '411001', displayName: 'Pune, Maharashtra' },
+            address: reverseGeocodeAddress,
           }
         : { message: 'Location lookup is temporarily unavailable.' }),
     });
@@ -69,8 +78,8 @@ async function prepareMarketplace(
     await page.getByRole('button', { name: /Cart/ }).first().click();
   }
   await page.getByRole('button', { name: 'Continue to payment' }).click();
-  await page.getByRole('button', { name: 'Use my current location' }).waitFor();
-  return { page, profileUpdates };
+  await page.getByRole('button', { name: 'Detect my location' }).waitFor();
+  return { page, profileUpdates, getReverseGeocodeRequests: () => reverseGeocodeRequests };
 }
 
 test('granted geolocation automatically fills checkout and saves the buyer address', async ({ browser }) => {
@@ -80,10 +89,13 @@ test('granted geolocation automatically fills checkout and saves the buyer addre
   });
   try {
     const { page, profileUpdates } = await prepareMarketplace(context);
-    await page.getByRole('button', { name: 'Use my current location' }).click();
-    await expect(page.getByText('Delivery location updated to Pune, Maharashtra.')).toBeVisible();
-    await expect(page.getByLabel('City')).toHaveValue('Pune');
-    await expect(page.getByLabel('District')).toHaveValue('Pune');
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText('Location found. Confirm your delivery address.')).toBeVisible();
+    expect(profileUpdates).toHaveLength(0);
+    await page.getByRole('button', { name: 'Confirm and save address' }).click();
+    await expect(page.getByText('Delivery address confirmed: Pune, Maharashtra.')).toBeVisible();
+    await expect(page.getByLabel('City').first()).toHaveValue('Pune');
+    await expect(page.getByLabel('District').first()).toHaveValue('Pune');
     await expect(page.getByLabel('State')).toHaveValue('Maharashtra');
     await expect(page.getByLabel('PIN code')).toHaveValue('411001');
     expect(profileUpdates).toEqual([{
@@ -110,10 +122,10 @@ test('denied geolocation keeps manual address entry available', async ({ browser
       setting: 'denied',
       origin: 'http://127.0.0.1:4173',
     });
-    await page.getByRole('button', { name: 'Use my current location' }).click();
-    await expect(page.getByText('Location permission was denied. Enter your address manually.')).toBeVisible();
-    await page.getByLabel('City').fill('Pune');
-    await expect(page.getByLabel('City')).toHaveValue('Pune');
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText('Location permission was denied. Enter your address manually or allow location access.')).toBeVisible();
+    await page.getByLabel('City').first().fill('Pune');
+    await expect(page.getByLabel('City').first()).toHaveValue('Pune');
     await expect(page.getByRole('button', { name: 'Continue to secure payment' })).toBeVisible();
     await expect(page.getByText('Calculated by server')).toBeVisible();
   } finally {
@@ -140,13 +152,14 @@ test('reverse-geocoding errors preserve the confirmed address and allow retry or
         pinCode: '111111',
       }
     );
-    await page.getByRole('button', { name: 'Use my current location' }).click();
-    await expect(page.getByText('Address lookup is temporarily unavailable. Enter your locality or PIN code manually, or try again.')).toBeVisible();
-    await expect(page.getByLabel('City')).toHaveValue('Old City');
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText('Couldn’t fetch your address automatically. Enter your PIN code and locality to continue.')).toBeVisible();
+    await expect(page.getByLabel('City').first()).toHaveValue('Old City');
     await expect(page.getByLabel('PIN code')).toHaveValue('111111');
     await page.getByRole('button', { name: 'Try location again' }).click();
-    await expect(page.getByText('Delivery location updated to Pune, Maharashtra.')).toBeVisible();
-    await expect(page.getByLabel('City')).toHaveValue('Pune');
+    await expect(page.getByText('Location found. Confirm your delivery address.')).toBeVisible();
+    await page.getByRole('button', { name: 'Confirm and save address' }).click();
+    await expect(page.getByLabel('City').first()).toHaveValue('Pune');
     expect(profileUpdates).toHaveLength(1);
   } finally {
     await context.close();
@@ -160,28 +173,125 @@ test('manual address entry remains available when reverse-geocoding is unavailab
   });
   try {
     const { page } = await prepareMarketplace(context, 503);
-    await page.getByRole('button', { name: 'Use my current location' }).click();
-    await expect(page.getByText('Address lookup is temporarily unavailable. Enter your locality or PIN code manually, or try again.')).toBeVisible();
-    await expect(page.getByLabel('City')).toHaveValue('');
-    await page.getByLabel('City').fill('Pune');
-    await expect(page.getByLabel('City')).toHaveValue('Pune');
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText('Couldn’t fetch your address automatically. Enter your PIN code and locality to continue.')).toBeVisible();
+    await expect(page.getByLabel('City').first()).toHaveValue('');
+    await page.getByLabel('City').first().fill('Pune');
+    await expect(page.getByLabel('City').first()).toHaveValue('Pune');
   } finally {
     await context.close();
   }
 });
 
-test('location permission UX fits a narrow mobile viewport', async ({ browser }) => {
+test('location selector fits mobile and tablet viewports', async ({ browser }) => {
+  test.setTimeout(60_000);
+  for (const width of [360, 390, 768]) {
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      permissions: ['geolocation'],
+      geolocation: { latitude: 18.5204, longitude: 73.8567 },
+    });
+    try {
+      const { page } = await prepareMarketplace(context);
+      await page.getByRole('button', { name: 'Detect my location' }).click();
+      await expect(page.getByText('Location found. Confirm your delivery address.')).toBeVisible();
+      await page.getByRole('button', { name: 'Confirm and save address' }).click();
+      const bodyWidth = await page.locator('body').evaluate((element) => element.scrollWidth);
+      expect(bodyWidth).toBeLessThanOrEqual(width);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('missing PIN remains a required editable confirmation field', async ({ browser }) => {
   const context = await browser.newContext({
-    viewport: { width: 375, height: 812 },
     permissions: ['geolocation'],
     geolocation: { latitude: 18.5204, longitude: 73.8567 },
   });
   try {
+    const { page, profileUpdates } = await prepareMarketplace(context, 200, undefined, {
+      city: 'Pune',
+      district: 'Pune',
+      state: 'Maharashtra',
+      pinCode: '',
+      displayName: 'Pune, Maharashtra',
+    });
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByLabel('Confirm PIN code')).toHaveValue('');
+    await expect(page.getByRole('button', { name: 'Confirm and save address' })).toBeDisabled();
+    await page.getByLabel('Confirm PIN code').fill('411001');
+    await page.getByRole('button', { name: 'Confirm and save address' }).click();
+    await expect.poll(() => profileUpdates).toHaveLength(1);
+  } finally {
+    await context.close();
+  }
+});
+
+test('manual locality and PIN entry uses the same confirm-and-save action', async ({ browser }) => {
+  const context = await browser.newContext({
+    permissions: ['geolocation'],
+    geolocation: { latitude: 18.5204, longitude: 73.8567 },
+  });
+  try {
+    const { page, profileUpdates } = await prepareMarketplace(context, 503);
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText('Couldn’t fetch your address automatically. Enter your PIN code and locality to continue.')).toBeVisible();
+    await page.getByRole('button', { name: 'Enter address manually' }).click();
+    await page.getByLabel('Locality').fill('Kothrud');
+    await page.getByRole('textbox', { name: 'City' }).first().fill('Pune');
+    await page.getByLabel('District').first().fill('Pune');
+    await page.getByRole('textbox', { name: 'State' }).first().fill('Maharashtra');
+    await page.getByLabel('Confirm PIN code').fill('411038');
+    await page.getByRole('button', { name: 'Confirm and save address' }).click();
+    await expect.poll(() => profileUpdates).toHaveLength(1);
+    expect(profileUpdates[0]).toMatchObject({
+      address: {
+        villageOrCity: 'Pune',
+        district: 'Pune',
+        state: 'Maharashtra',
+        pinCode: '411038',
+      },
+    });
+  } finally {
+    await context.close();
+  }
+});
+
+test('browser geolocation timeout exposes manual entry', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
     const { page } = await prepareMarketplace(context);
-    await page.getByRole('button', { name: 'Use my current location' }).click();
-    await expect(page.getByText('Delivery location updated to Pune, Maharashtra.')).toBeVisible();
-    const bodyWidth = await page.locator('body').evaluate((element) => element.scrollWidth);
-    expect(bodyWidth).toBeLessThanOrEqual(375);
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'geolocation', {
+        configurable: true,
+        value: {
+          getCurrentPosition: (_success: unknown, error: (value: { code: number }) => void) => error({ code: 3 }),
+        },
+      });
+    });
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText('Location detection timed out. Try again or enter your address manually.')).toBeVisible();
+    await expect(page.getByLabel('City')).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test('rapid repeated detection taps issue one reverse-geocode request', async ({ browser }) => {
+  const context = await browser.newContext({
+    permissions: ['geolocation'],
+    geolocation: { latitude: 18.5204, longitude: 73.8567 },
+  });
+  try {
+    const { page, getReverseGeocodeRequests } = await prepareMarketplace(context);
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Detect my location'));
+      button?.click();
+      button?.click();
+    });
+    await expect(page.getByText('Location found. Confirm your delivery address.')).toBeVisible();
+    expect(getReverseGeocodeRequests()).toBe(1);
   } finally {
     await context.close();
   }

@@ -14,6 +14,7 @@ import { queueOrderConfirmation, processEmailOutbox } from '../services/email.js
 import bcrypt from 'bcryptjs';
 import { AuditLog } from '../models/AuditLog.js';
 import { BuyerProfile } from '../models/BuyerProfile.js';
+import { PendingSignup } from '../models/PendingSignup.js';
 
 const testSeedPassword = randomBytes(32).toString('base64url');
 
@@ -307,7 +308,11 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .query({ city: 'Hyderabad', state: 'Telangana', pinCode: '500081' });
     expect(unconfiguredRes.status).toBe(200);
     expect(unconfiguredRes.body.configured).toBe(false);
-    expect(unconfiguredRes.body.serviceable).toBe(true);
+    expect(unconfiguredRes.body.serviceable).toBeNull();
+    const invalidPinRes = await request(app)
+      .get('/api/serviceability')
+      .query({ city: 'Hyderabad', state: 'Telangana', pinCode: '50008' });
+    expect(invalidPinRes.status).toBe(400);
 
     await ServiceZone.create({
       name: 'Hyderabad Central',
@@ -394,6 +399,8 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
   });
 
   it('9. Should distinguish invalid coordinates and incomplete or unavailable geocoding results', async () => {
+    const { clearGeocodingCacheForTests } = await import('../services/geocoding.js');
+    clearGeocodingCacheForTests();
     const previousProvider = process.env.GEOCODING_PROVIDER;
     process.env.GEOCODING_PROVIDER = 'nominatim';
     const fetchMock = vi.fn()
@@ -410,7 +417,7 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
           city: 'Test City',
           county: 'Test District',
           state: 'Test State',
-          postcode: '12345',
+          postcode: '123456',
           country: 'India',
         },
         display_name: 'Test City, Test State',
@@ -435,8 +442,9 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         .post('/api/location/reverse-geocode')
         .send({ lat: 18.5, lon: 73.8, accuracy: 20 });
       expect(compatibleCoordinates.status).toBe(200);
-      expect(compatibleCoordinates.body.address.pinCode).toBe('12345');
+      expect(compatibleCoordinates.body.address.pinCode).toBe('123456');
 
+      clearGeocodingCacheForTests();
       const providerUnavailable = await request(app)
         .post('/api/location/reverse-geocode')
         .send({ latitude: 18.6, longitude: 73.8 });
@@ -450,6 +458,8 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
   });
 
   it('9b. Categorizes geocoding rate limits, timeouts, network failures, and malformed results', async () => {
+    const { clearGeocodingCacheForTests } = await import('../services/geocoding.js');
+    clearGeocodingCacheForTests();
     const previousProvider = process.env.GEOCODING_PROVIDER;
     process.env.GEOCODING_PROVIDER = 'nominatim';
     const warningLog = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -502,14 +512,25 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
   }, 15000);
 
   it('10. Should reject admin self-registration and keep requested role access pending approval', async () => {
-    vi.stubEnv('RESEND_API_KEY', 'test-resend-key');
-    vi.stubEnv('RESEND_FROM_EMAIL', 'AgriConnect <verify@example.test>');
-    vi.stubEnv('FRONTEND_URL', 'http://localhost:3000');
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ id: 'verification-test' })));
+    vi.stubEnv('EMAIL_PROVIDER', 'console');
+    vi.stubEnv('NODE_ENV', 'test');
+    const otpLogger = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const createVerifiedApplicant = async (payload: Record<string, unknown>) => {
+      const response = await request(app).post('/api/auth/register').send(payload);
+      expect(response.status).toBe(202);
+      const email = String(payload.email).toLowerCase();
+      const consoleMessage = otpLogger.mock.calls.map(([message]) => String(message)).at(-1) || '';
+      const otp = consoleMessage.match(/:\s(\d{6})$/)?.[1];
+      expect(otp).toBeTruthy();
+      expect(await User.findOne({ email })).toBeNull();
+      const verified = await request(app).post('/api/auth/verify-otp').send({ email, otp });
+      expect(verified.status).toBe(200);
+      return verified;
+    };
 
     const res = await request(app).post('/api/auth/register').send({
       name: 'Untrusted Role User',
-      email: `role-test-${Date.now()}@example.com`,
+      email: `role-test-${randomBytes(8).toString('hex')}@example.com`,
       password: 'StrongPassword123!',
       phone: '9123456789',
       role: 'admin',
@@ -517,24 +538,22 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
 
     expect(res.status).toBe(400);
 
-    const customerRegistration = await request(app).post('/api/auth/register').send({
+    const customerRegistration = await createVerifiedApplicant({
       name: 'Approved Later User',
-      email: `approved-later-${Date.now()}@example.com`,
+      email: `approved-later-${randomBytes(8).toString('hex')}@example.com`,
       password: 'StrongPassword123!',
       phone: '9123456789',
     });
-    expect(customerRegistration.status).toBe(201);
     expect(customerRegistration.body.user.role).toBe('buyer');
 
-    const roleRequest = await request(app).post('/api/auth/register').send({
+    const roleRequest = await createVerifiedApplicant({
       name: 'Farmer Applicant',
-      email: `farmer-request-${Date.now()}@example.com`,
+      email: `farmer-request-${randomBytes(8).toString('hex')}@example.com`,
       password: 'StrongPassword123!',
       phone: '9123456789',
       role: 'farmer',
       farm: { farmName: 'Applicant Farm', village: 'Test Village', district: 'Test District', state: 'Test State', pinCode: '123456' },
     });
-    expect(roleRequest.status).toBe(201);
     expect(roleRequest.body.user.role).toBe('buyer');
     expect(roleRequest.body.user.requestedRole).toBe('farmer');
     expect(roleRequest.body.user.requestedFarm.farmName).toBe('Applicant Farm');
@@ -542,14 +561,13 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
 
     const additionalRoleRequests: Array<{ id: string; requestedRole: 'business' | 'logistics' }> = [];
     for (const requestedRole of ['business', 'logistics'] as const) {
-      const response = await request(app).post('/api/auth/register').send({
+      const response = await createVerifiedApplicant({
         name: `${requestedRole} Applicant`,
-        email: `${requestedRole}-request-${Date.now()}@example.com`,
+        email: `${requestedRole}-request-${randomBytes(8).toString('hex')}@example.com`,
         password: 'StrongPassword123!',
         phone: '9123456789',
         role: requestedRole,
       });
-      expect(response.status).toBe(201);
       expect(response.body.user.role).toBe('buyer');
       expect(response.body.user.requestedRole).toBe(requestedRole);
       expect(response.body.user.status).toBe('pending_verification');
@@ -603,19 +621,17 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     expect(manualApproval.status).toBe(200);
     expect(manualApproval.body.user.role).toBe('logistics');
     const manuallyApprovedUser = await User.findById(customerRegistration.body.user.id);
-    expect(manuallyApprovedUser?.emailVerified).toBe(false);
-    await User.updateOne(
-      { _id: customerRegistration.body.user.id },
-      { $set: { emailVerified: true } }
-    );
+    expect(manuallyApprovedUser?.emailVerified).toBe(true);
+    otpLogger.mockRestore();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
 
-  it('10b. Does not require a phone number and rejects registration when Resend is unconfigured', async () => {
-    vi.stubEnv('RESEND_API_KEY', '');
-    vi.stubEnv('RESEND_FROM_EMAIL', '');
-    vi.stubEnv('FRONTEND_URL', '');
+  it('10b. Does not require a phone number and rejects signup when the OTP provider is unconfigured', async () => {
+    vi.stubEnv('EMAIL_PROVIDER', 'brevo');
+    vi.stubEnv('BREVO_API_KEY', '');
+    vi.stubEnv('EMAIL_FROM', 'verify@example.test');
+    vi.stubEnv('EMAIL_FROM_NAME', 'AgriConnect');
     const email = `verification-unconfigured-${randomBytes(8).toString('hex')}@example.test`;
     try {
       const response = await request(app).post('/api/auth/register').send({
@@ -624,17 +640,20 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         password: 'VerificationPassword123!',
       });
       expect(response.status).toBe(503);
-      expect(response.body.code).toBe('VERIFICATION_NOT_CONFIGURED');
+      expect(response.body.code).toBe('OTP_DELIVERY_FAILED');
       expect(await User.findOne({ email })).toBeNull();
+      expect(await PendingSignup.findOne({ email })).toBeTruthy();
     } finally {
+      await PendingSignup.deleteMany({ email });
       vi.unstubAllEnvs();
     }
   });
 
-  it('10a. Requires one-time email verification before login', async () => {
+  it('10a. Creates no User before the six-digit email OTP is verified', async () => {
+    vi.stubEnv('EMAIL_PROVIDER', 'resend');
+    vi.stubEnv('EMAIL_FROM_NAME', 'AgriConnect');
     vi.stubEnv('RESEND_API_KEY', 'test-resend-key');
-    vi.stubEnv('RESEND_FROM_EMAIL', 'AgriConnect <verify@example.test>');
-    vi.stubEnv('FRONTEND_URL', 'http://localhost:3000');
+    vi.stubEnv('EMAIL_FROM', 'verify@example.test');
     let emailBody = '';
     const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       if (String(input).startsWith('https://api.resend.com/emails')) {
@@ -651,14 +670,15 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         email,
         password: 'VerificationPassword123!',
       });
-      expect(registration.status).toBe(201);
+      expect(registration.status).toBe(202);
       expect(registration.body.token).toBeUndefined();
-      expect(registration.body.verification).toEqual({ emailSent: true });
+      expect(registration.body.otpSent).toBe(true);
 
-      const user = await User.findOne({ email });
-      expect(user?.emailVerified).toBe(false);
-      expect(user?.phone).toBe('');
-      expect(user?.isVerified).toBe(false);
+      expect(await User.findOne({ email })).toBeNull();
+      const pending = await PendingSignup.findOne({ email }).select('+otpHash');
+      const emailOtp = JSON.parse(emailBody).text.match(/verification code is (\d{6})/)?.[1];
+      expect(emailOtp).toMatch(/^\d{6}$/);
+      expect(pending?.otpHash).not.toBe(emailOtp);
 
       const unverifiedLogin = await request(app).post('/api/auth/login').send({
         email,
@@ -667,19 +687,10 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       expect(unverifiedLogin.status).toBe(403);
       expect(unverifiedLogin.body.code).toBe('EMAIL_NOT_VERIFIED');
 
-      const emailLink = JSON.parse(emailBody).text.match(/https?:\/\/\S+/)?.[0] as string;
-      const emailToken = new URLSearchParams(new URL(emailLink).hash.slice(1)).get('token');
-      expect(emailToken).toBeTruthy();
-      const storedToken = await User.findById(user!._id).select('+emailVerificationTokenHash');
-      expect(storedToken?.emailVerificationTokenHash).not.toBe(emailToken);
-
-      const emailVerification = await request(app)
-        .post('/api/auth/verification/email/confirm')
-        .send({ token: emailToken });
+      const emailVerification = await request(app).post('/api/auth/verify-otp').send({ email, otp: emailOtp });
       expect(emailVerification.status).toBe(200);
-      expect(emailVerification.body.emailVerified).toBe(true);
-      expect(emailVerification.body.phoneVerified).toBeUndefined();
-      await User.updateOne({ _id: user!._id }, { $set: { phoneVerified: false } });
+      expect(emailVerification.body.user.emailVerified).toBe(true);
+      expect(await PendingSignup.findOne({ email })).toBeNull();
 
       const verifiedLogin = await request(app).post('/api/auth/login').send({
         email,
@@ -692,10 +703,6 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         .set('Authorization', `Bearer ${verifiedLogin.body.token}`);
       expect(authenticatedProfile.status).toBe(200);
 
-      const reusedEmailToken = await request(app)
-        .post('/api/auth/verification/email/confirm')
-        .send({ token: emailToken });
-      expect(reusedEmailToken.status).toBe(400);
       expect(providerFetch).toHaveBeenCalledTimes(1);
     } finally {
       const user = await User.findOne({ email });
@@ -704,6 +711,7 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         await AuditLog.deleteMany({ userId: user._id });
         await User.deleteOne({ _id: user._id });
       }
+      await PendingSignup.deleteMany({ email });
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();
     }
@@ -741,9 +749,10 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
   });
 
   it('10d. Allows retry after a Resend outage and keeps resend responses non-enumerating', async () => {
+    vi.stubEnv('EMAIL_PROVIDER', 'resend');
     vi.stubEnv('RESEND_API_KEY', 'test-resend-key');
-    vi.stubEnv('RESEND_FROM_EMAIL', 'AgriConnect <verify@example.test>');
-    vi.stubEnv('FRONTEND_URL', 'http://localhost:3000');
+    vi.stubEnv('EMAIL_FROM', 'verify@example.test');
+    vi.stubEnv('EMAIL_FROM_NAME', 'AgriConnect');
     const providerFetch = vi.fn()
       .mockResolvedValueOnce(new Response('provider unavailable', { status: 503 }))
       .mockResolvedValueOnce(Response.json({ id: 'verification-retry' }));
@@ -755,14 +764,14 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         email,
         password: 'VerificationPassword123!',
       });
-      expect(registration.status).toBe(202);
-      expect(registration.body.verification.emailSent).toBe(false);
-      expect(registration.body.message).toMatch(/could not be sent/i);
-      expect(await User.findOne({ email })).toMatchObject({ emailVerified: false });
+      expect(registration.status).toBe(502);
+      expect(registration.body.code).toBe('OTP_DELIVERY_FAILED');
+      expect(registration.body.retryable).toBe(true);
+      expect(await User.findOne({ email })).toBeNull();
 
-      const retry = await request(app).post('/api/auth/verification/email/resend').send({ email });
+      const retry = await request(app).post('/api/auth/resend-otp').send({ email });
       const unknownEmail = await request(app)
-        .post('/api/auth/verification/email/resend')
+        .post('/api/auth/resend-otp')
         .send({ email: `unknown-${email}` });
       expect(retry.status).toBe(202);
       expect(retry.body).toEqual(unknownEmail.body);
@@ -774,6 +783,7 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         await AuditLog.deleteMany({ userId: user._id });
         await User.deleteOne({ _id: user._id });
       }
+      await PendingSignup.deleteMany({ email });
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();
     }

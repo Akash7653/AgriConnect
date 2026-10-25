@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, ChevronDown, MapPin, Search, ShoppingCart, Sprout, X } from 'lucide-react';
+import { ArrowRight, ChevronDown, MapPin, Search, ShoppingCart, Sprout, X } from 'lucide-react';
 import { LocationSelector } from '@/components/marketplace/LocationSelector';
 import { ProductCard } from '@/components/marketplace/ProductCard';
 import { useAuth } from '@/hooks/useAuth';
 import { useCart } from '@/hooks/useCart';
 import { request } from '@/services/api';
+import { cacheLocationServiceability, getLocationServiceability, type LocationServiceability } from '@/services/location';
 import { ProductsService } from '@/services/products';
 import type { CropProduct, ProductCategory } from '@/types';
 import { classNames, formatCurrency } from '@/utils';
@@ -44,18 +45,24 @@ export function BuyerHomeExperience() {
   const [campaignError, setCampaignError] = useState('');
   const [locationOpen, setLocationOpen] = useState(false);
   const [manualLocation, setManualLocation] = useState({ city: '', district: '', state: '', pinCode: '' });
-  const [guestLocation, setGuestLocation] = useState<{ city: string; district: string; state: string; pinCode: string } | null>(() => {
+  const [guestLocation, setGuestLocation] = useState<{ city: string; district: string; state: string; pinCode: string; displayName?: string } | null>(() => {
     try {
       const saved = localStorage.getItem('agriconnect-delivery-location');
       if (!saved) return null;
-      const location = JSON.parse(saved) as { city?: unknown; district?: unknown; state?: unknown; pinCode?: unknown };
+      const location = JSON.parse(saved) as { city?: unknown; district?: unknown; state?: unknown; pinCode?: unknown; displayName?: unknown };
       if (
         typeof location.city === 'string' &&
         typeof location.district === 'string' &&
         typeof location.state === 'string' &&
         typeof location.pinCode === 'string'
       ) {
-        return { city: location.city, district: location.district, state: location.state, pinCode: location.pinCode };
+        return {
+          city: location.city,
+          district: location.district,
+          state: location.state,
+          pinCode: location.pinCode,
+          ...(typeof location.displayName === 'string' ? { displayName: location.displayName } : {}),
+        };
       }
       console.warn('Saved delivery location was incomplete and has been ignored.');
     } catch (error) {
@@ -86,6 +93,7 @@ export function BuyerHomeExperience() {
   const deliveryState = address?.state || guestLocation?.state;
   const deliveryDistrict = address?.district || guestLocation?.district;
   const addressLabel = [address?.villageOrCity, address?.district, address?.state].filter(Boolean).join(', ')
+    || guestLocation?.displayName
     || [guestLocation?.city, guestLocation?.district, guestLocation?.state].filter(Boolean).join(', ');
   const categories = useMemo(() => {
     const present = new Set(products.map((product) => product.category));
@@ -164,17 +172,17 @@ export function BuyerHomeExperience() {
     setServiceabilityMessage('');
     try {
       let statusMessage = 'Delivery serviceability could not be verified. Confirm availability during checkout.';
+      let checkedResult: LocationServiceability = {
+        configured: false,
+        serviceable: null,
+        message: statusMessage,
+      };
       try {
-        const result = await request<{
-          configured: boolean;
-          serviceable: boolean;
-          zone?: { estimatedDeliveryDays?: number };
-        }>(
-          `/serviceability?${new URLSearchParams({ city: location.city, state: location.state, pinCode: location.pinCode })}`
-        );
+        const result = await getLocationServiceability(location, { useCache: false });
+        checkedResult = result;
         statusMessage = !result.configured
           ? 'Delivery serviceability is not configured yet. Availability will be confirmed at checkout.'
-          : result.serviceable
+          : result.serviceable === true
             ? result.zone?.estimatedDeliveryDays
               ? `Estimated delivery within ${result.zone.estimatedDeliveryDays} ${result.zone.estimatedDeliveryDays === 1 ? 'day' : 'days'} after order confirmation. Timing may vary.`
               : 'This PIN code is in a supported delivery area. Delivery timing is not configured.'
@@ -192,19 +200,21 @@ export function BuyerHomeExperience() {
           pinCode: location.pinCode,
         });
       } else {
-        setGuestLocation(location);
         try {
           localStorage.setItem('agriconnect-delivery-location', JSON.stringify({
             city: location.city,
             district: location.district,
             state: location.state,
             pinCode: location.pinCode,
+            ...(location.displayName ? { displayName: location.displayName } : {}),
           }));
         } catch (storageError) {
           setLocationError('This location is selected for now, but could not be saved on this device.');
           console.error('Could not persist guest delivery location.', storageError);
           return false;
         }
+        cacheLocationServiceability(location, checkedResult);
+        setGuestLocation(location);
       }
       setServiceabilityMessage(statusMessage);
       setLocationOpen(false);
@@ -260,7 +270,7 @@ export function BuyerHomeExperience() {
 
         {serviceabilityMessage && (
           <p className="mt-2 flex items-center gap-1 text-xs text-charcoal/65" aria-live="polite">
-            <CheckCircle2 className="h-3.5 w-3.5 text-agri-green" />{serviceabilityMessage}
+            <MapPin className="h-3.5 w-3.5 text-agri-green" />{serviceabilityMessage}
           </p>
         )}
 
@@ -437,7 +447,7 @@ export function BuyerHomeExperience() {
                 ] as const).map(([key, label]) => (
                   <label key={key} className="text-xs font-medium text-charcoal/70">
                     {label}
-                    <input required minLength={key === 'pinCode' ? 5 : 2} value={manualLocation[key]} onChange={(event) => setManualLocation((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 min-h-11 w-full rounded-xl border border-forest/15 bg-white px-3 text-sm text-forest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agri-green" />
+                    <input required minLength={key === 'pinCode' ? 6 : 2} maxLength={key === 'pinCode' ? 6 : undefined} pattern={key === 'pinCode' ? '[0-9]{6}' : undefined} inputMode={key === 'pinCode' ? 'numeric' : undefined} value={manualLocation[key]} onChange={(event) => setManualLocation((current) => ({ ...current, [key]: key === 'pinCode' ? event.target.value.replace(/\D/g, '').slice(0, 6) : event.target.value }))} className="mt-1 min-h-11 w-full rounded-xl border border-forest/15 bg-white px-3 text-sm text-forest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agri-green" />
                   </label>
                 ))}
               </div>

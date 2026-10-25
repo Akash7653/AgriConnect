@@ -52,7 +52,8 @@ interface AuthResponse {
 interface RegistrationResponse {
   success: boolean;
   message: string;
-  verification: { emailSent: boolean };
+  email: string;
+  otpSent: boolean;
 }
 
 export const AuthService = {
@@ -93,6 +94,21 @@ export const AuthService = {
     });
   },
 
+  async resendOtp(email: string): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/resend-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async verifyOtp(email: string, otp: string): Promise<AuthSession> {
+    const response = await request<AuthResponse>('/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp }),
+    });
+    return { token: response.token, user: AuthService.mapUser(response.user) };
+  },
+
   async confirmEmailVerification(token: string): Promise<{ email: string; emailVerified: boolean }> {
     return request<{ email: string; emailVerified: boolean }>('/auth/verification/email/confirm', {
       method: 'POST',
@@ -120,7 +136,7 @@ export const AuthService = {
         0
       );
     }
-    return request<RegistrationResponse>('/auth/register', {
+    return request<RegistrationResponse>('/auth/signup', {
       method: 'POST',
       body: JSON.stringify({
         name: payload.fullName,

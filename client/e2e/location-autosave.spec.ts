@@ -69,8 +69,9 @@ test('detects and saves location once, then reuses the saved account address', a
 
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Fresh listings from verified farms.' })).toBeVisible();
-    await page.getByRole('button', { name: 'Change delivery location' }).click();
-    await page.getByRole('button', { name: 'Use my current location' }).click();
+    await page.getByRole('banner').getByRole('button', { name: 'Change delivery location' }).click();
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await page.getByRole('button', { name: 'Confirm and save address' }).click();
 
     await expect.poll(() => savedAddress).toMatchObject({
       villageOrCity: 'Pune',
@@ -78,6 +79,7 @@ test('detects and saves location once, then reuses the saved account address', a
       state: 'Maharashtra',
       pinCode: '411001',
     });
+    await expect(page.getByText('Delivery serviceability is not configured yet. Availability will be confirmed at checkout.')).toBeVisible();
     await expect(page.getByText('Pune, Pune, Maharashtra')).toBeVisible();
 
     await page.reload();
