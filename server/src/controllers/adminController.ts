@@ -282,11 +282,14 @@ const serviceZoneSchema = z.object({
   name: z.string().min(2),
   city: z.string().min(2),
   state: z.string().min(2),
-  postalCodes: z.array(z.string().min(5)).min(1),
+  postalCodes: z.array(z.string().regex(/^\d{6}$/)).default([]),
+  postalCodePrefixes: z.array(z.string().regex(/^\d{3}$/)).default([]),
   active: z.boolean().default(true),
   deliveryFeePaise: z.number().int().min(0).optional(),
   freeDeliveryThresholdPaise: z.number().int().min(0).optional(),
   estimatedDeliveryDays: z.number().int().min(1).max(30).optional(),
+  estimatedDeliveryDaysMin: z.number().int().min(1).max(30).optional(),
+  estimatedDeliveryDaysMax: z.number().int().min(1).max(30).optional(),
   fulfilmentMethods: z
     .array(z.enum(['supplier_delivery', 'third_party_delivery', 'customer_pickup', 'platform_hub']))
     .min(1)
@@ -305,6 +308,18 @@ export async function getServiceZones(req: AuthRequest, res: Response): Promise<
 export async function createServiceZone(req: AuthRequest, res: Response): Promise<void> {
   try {
     const data = serviceZoneSchema.parse(req.body);
+    if (data.postalCodes.length === 0 && data.postalCodePrefixes.length === 0) {
+      res.status(400).json({ success: false, message: 'Add at least one six-digit PIN code or three-digit PIN prefix.' });
+      return;
+    }
+    if (
+      data.estimatedDeliveryDaysMin !== undefined
+      && data.estimatedDeliveryDaysMax !== undefined
+      && data.estimatedDeliveryDaysMin > data.estimatedDeliveryDaysMax
+    ) {
+      res.status(400).json({ success: false, message: 'The minimum delivery estimate cannot exceed the maximum.' });
+      return;
+    }
     const zone = await ServiceZone.create(data);
 
     await AuditLog.create({
@@ -326,6 +341,21 @@ export async function createServiceZone(req: AuthRequest, res: Response): Promis
 export async function updateServiceZone(req: AuthRequest, res: Response): Promise<void> {
   try {
     const data = serviceZoneSchema.partial().parse(req.body);
+    if (
+      data.postalCodes?.length === 0
+      && data.postalCodePrefixes?.length === 0
+    ) {
+      res.status(400).json({ success: false, message: 'A service zone must include at least one PIN code or prefix.' });
+      return;
+    }
+    if (
+      data.estimatedDeliveryDaysMin !== undefined
+      && data.estimatedDeliveryDaysMax !== undefined
+      && data.estimatedDeliveryDaysMin > data.estimatedDeliveryDaysMax
+    ) {
+      res.status(400).json({ success: false, message: 'The minimum delivery estimate cannot exceed the maximum.' });
+      return;
+    }
     const zone = await ServiceZone.findByIdAndUpdate(req.params.id, { $set: data }, { new: true, runValidators: true });
     if (!zone) {
       res.status(404).json({ success: false, message: 'Service zone not found' });

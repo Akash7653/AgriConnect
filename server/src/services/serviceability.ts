@@ -13,7 +13,8 @@ export interface ServiceabilityResult {
   zone?: Pick<
     IServiceZone,
     '_id' | 'name' | 'city' | 'state' | 'deliveryFeePaise' |
-    'freeDeliveryThresholdPaise' | 'estimatedDeliveryDays' | 'fulfilmentMethods'
+    'freeDeliveryThresholdPaise' | 'estimatedDeliveryDays' |
+    'estimatedDeliveryDaysMin' | 'estimatedDeliveryDaysMax' | 'fulfilmentMethods'
   >;
 }
 
@@ -33,9 +34,14 @@ export async function checkServiceability(address: ServiceabilityAddress): Promi
 
   const zone = await ServiceZone.findOne({
     active: true,
-    city: { $regex: `^${escapeRegex(city)}$`, $options: 'i' },
     state: { $regex: `^${escapeRegex(state)}$`, $options: 'i' },
-    postalCodes: pinCode,
+    $or: [
+      {
+        city: { $regex: `^${escapeRegex(city)}$`, $options: 'i' },
+        postalCodes: pinCode,
+      },
+      { postalCodePrefixes: pinCode.slice(0, 3) },
+    ],
   }).lean();
 
   if (!zone) {
@@ -58,6 +64,8 @@ export async function checkServiceability(address: ServiceabilityAddress): Promi
       deliveryFeePaise: zone.deliveryFeePaise,
       freeDeliveryThresholdPaise: zone.freeDeliveryThresholdPaise,
       estimatedDeliveryDays: zone.estimatedDeliveryDays,
+      estimatedDeliveryDaysMin: zone.estimatedDeliveryDaysMin,
+      estimatedDeliveryDaysMax: zone.estimatedDeliveryDaysMax,
       fulfilmentMethods: zone.fulfilmentMethods,
     },
   };

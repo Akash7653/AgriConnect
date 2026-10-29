@@ -69,6 +69,8 @@ beforeAll(async () => {
     state: 'Telangana',
     postalCodes: ['500081'],
     active: true,
+    deliveryFeePaise: 0,
+    freeDeliveryThresholdPaise: 0,
     fulfilmentMethods: ['supplier_delivery', 'third_party_delivery'],
   });
 }, 30000);
@@ -139,6 +141,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
     expect(order?.payment.paymentOrderId).toBeUndefined();
     expect(order?.items).toHaveLength(1);
     expect(order?.items[0].quantity).toBe(2);
+    expect(order?.pricing.deliveryFeePaise).toBe(0);
 
     const repeated = await request(app)
       .post('/api/payment/create-order')

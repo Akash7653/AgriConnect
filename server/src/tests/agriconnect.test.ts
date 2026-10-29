@@ -16,6 +16,7 @@ import { AuditLog } from '../models/AuditLog.js';
 import { BuyerProfile } from '../models/BuyerProfile.js';
 import { PendingSignup } from '../models/PendingSignup.js';
 import { signToken } from '../middleware/auth.js';
+import { ensureTelanganaServiceZone } from '../services/defaultServiceZones.js';
 
 const testSeedPassword = randomBytes(32).toString('base64url');
 
@@ -369,6 +370,30 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     expect(unsupportedRes.status).toBe(200);
     expect(unsupportedRes.body.serviceable).toBe(false);
 
+    await ServiceZone.deleteMany({});
+    await ensureTelanganaServiceZone();
+    await ensureTelanganaServiceZone();
+
+    const statewidePrefixRes = await request(app)
+      .get('/api/serviceability')
+      .query({ city: 'Medchal', state: 'Telangana', pinCode: '501401' });
+    expect(statewidePrefixRes.body).toMatchObject({
+      configured: true,
+      serviceable: true,
+      zone: {
+        name: 'Telangana Statewide',
+        deliveryFeePaise: 0,
+        freeDeliveryThresholdPaise: 0,
+        estimatedDeliveryDaysMin: 1,
+        estimatedDeliveryDaysMax: 3,
+      },
+    });
+
+    const otherTelanganaPinRes = await request(app)
+      .get('/api/serviceability')
+      .query({ city: 'Hyderabad', state: 'Telangana', pinCode: '500099' });
+    expect(otherTelanganaPinRes.body.serviceable).toBe(true);
+    expect(await ServiceZone.countDocuments({ name: 'Telangana Statewide' })).toBe(1);
     await ServiceZone.deleteMany({});
   });
 

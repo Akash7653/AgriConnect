@@ -47,6 +47,7 @@ import { getAllowedClientOrigins } from './config/clientOrigins.js';
 import { authenticateToken, requireRole } from './middleware/auth.js';
 import { USER_ROLES } from './config/constants.js';
 import { emailProviderHealth, checkEmailProviderStartup } from './services/otpEmail.js';
+import { ensureTelanganaServiceZone } from './services/defaultServiceZones.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -185,6 +186,7 @@ async function bootstrap() {
   try {
     checkEmailProviderStartup();
     await connectDB();
+    await ensureTelanganaServiceZone();
     if (process.env.NODE_ENV !== 'production') {
       await seedDatabaseIfEmpty();
     } else {

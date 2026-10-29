@@ -4,7 +4,11 @@ export interface LocationServiceability {
   configured: boolean;
   serviceable: boolean | null;
   message?: string;
-  zone?: { estimatedDeliveryDays?: number };
+  zone?: {
+    estimatedDeliveryDays?: number;
+    estimatedDeliveryDaysMin?: number;
+    estimatedDeliveryDaysMax?: number;
+  };
 }
 
 export interface DeliveryLocation {

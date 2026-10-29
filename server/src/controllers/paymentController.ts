@@ -312,8 +312,11 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
     const platformCommissionPaise = Math.round(grossProductValuePaise * (settings.platformCommissionPct / 100));
     const operationsReservePaise = grossProductValuePaise - farmerPayoutPaise - platformCommissionPaise;
 
+    const deliveryFee = serviceability.zone?.deliveryFeePaise ?? settings.defaultDeliveryFeePaise;
+    const freeDeliveryThreshold = serviceability.zone?.freeDeliveryThresholdPaise
+      ?? settings.freeDeliveryThresholdPaise;
     const deliveryFeePaise =
-      grossProductValuePaise >= settings.freeDeliveryThresholdPaise ? 0 : settings.defaultDeliveryFeePaise;
+      grossProductValuePaise >= freeDeliveryThreshold ? 0 : deliveryFee;
 
     const finalPayablePaise = grossProductValuePaise + deliveryFeePaise;
 

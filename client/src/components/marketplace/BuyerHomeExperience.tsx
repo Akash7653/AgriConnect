@@ -183,8 +183,10 @@ export function BuyerHomeExperience() {
         statusMessage = !result.configured
           ? 'Delivery serviceability is not configured yet. Availability will be confirmed at checkout.'
           : result.serviceable === true
-            ? result.zone?.estimatedDeliveryDays
-              ? `Estimated delivery within ${result.zone.estimatedDeliveryDays} ${result.zone.estimatedDeliveryDays === 1 ? 'day' : 'days'} after order confirmation. Timing may vary.`
+            ? result.zone?.estimatedDeliveryDaysMin && result.zone?.estimatedDeliveryDaysMax
+              ? `Estimated delivery within ${result.zone.estimatedDeliveryDaysMin}–${result.zone.estimatedDeliveryDaysMax} days after order confirmation. Timing may vary.`
+              : result.zone?.estimatedDeliveryDays
+                ? `Estimated delivery within ${result.zone.estimatedDeliveryDays} ${result.zone.estimatedDeliveryDays === 1 ? 'day' : 'days'} after order confirmation. Timing may vary.`
               : 'This PIN code is in a supported delivery area. Delivery timing is not configured.'
             : 'Delivery is not currently available for this PIN code.';
       } catch {
