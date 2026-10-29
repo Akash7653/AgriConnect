@@ -112,6 +112,44 @@ test('granted geolocation automatically fills checkout and saves the buyer addre
   }
 });
 
+test('location detection requests a fresh high-accuracy position', async ({ browser }) => {
+  const context = await browser.newContext({
+    permissions: ['geolocation'],
+    geolocation: { latitude: 18.5204, longitude: 73.8567 },
+  });
+  try {
+    const { page } = await prepareMarketplace(context);
+    await page.evaluate(() => {
+      const geolocation = navigator.geolocation;
+      const getCurrentPosition = geolocation.getCurrentPosition.bind(geolocation);
+      Object.defineProperty(navigator, 'geolocation', {
+        configurable: true,
+        value: {
+          getCurrentPosition(
+            success: PositionCallback,
+            error?: PositionErrorCallback | null,
+            options?: PositionOptions,
+          ) {
+            document.documentElement.dataset.geolocationOptions = JSON.stringify(options);
+            getCurrentPosition(success, error, options);
+          },
+        },
+      });
+    });
+
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText('Location found. Confirm your delivery address.')).toBeVisible();
+    const options = await page.locator('html').getAttribute('data-geolocation-options');
+    expect(JSON.parse(options ?? '{}')).toEqual({
+      enableHighAccuracy: true,
+      timeout: 30000,
+      maximumAge: 0,
+    });
+  } finally {
+    await context.close();
+  }
+});
+
 test('denied geolocation keeps manual address entry available', async ({ browser }) => {
   const context = await browser.newContext();
   const cdp = await browser.newBrowserCDPSession();

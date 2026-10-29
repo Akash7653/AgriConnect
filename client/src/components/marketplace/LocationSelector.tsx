@@ -125,7 +125,7 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
                 : 'Location detection failed. Enter your address manually.'
         );
       },
-      { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 },
+      { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 },
     );
   }
 
