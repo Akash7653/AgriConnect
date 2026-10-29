@@ -10,7 +10,7 @@ export interface ReverseGeocodeResult {
   locality: string;
   lat: number;
   lng: number;
-  source: 'google' | 'nominatim';
+  source: 'google' | 'nominatim' | 'photon';
   country?: string;
 }
 
@@ -68,6 +68,26 @@ const nominatimResponseSchema = z.object({
     postcode: z.string().optional(),
     country: z.string().optional(),
   }).optional(),
+}).passthrough();
+
+const photonResponseSchema = z.object({
+  features: z.array(z.object({
+    properties: z.object({
+      name: z.string().optional(),
+      housenumber: z.string().optional(),
+      street: z.string().optional(),
+      locality: z.string().optional(),
+      suburb: z.string().optional(),
+      city: z.string().optional(),
+      town: z.string().optional(),
+      village: z.string().optional(),
+      district: z.string().optional(),
+      county: z.string().optional(),
+      state: z.string().optional(),
+      postcode: z.string().optional(),
+      country: z.string().optional(),
+    }).passthrough(),
+  }).passthrough()).default([]),
 }).passthrough();
 
 const googleResponseSchema = z.object({
@@ -157,9 +177,9 @@ function providerChain(): ProviderName[] {
     || legacyPrimary
     || (process.env.GOOGLE_MAPS_API_KEY ? 'google' : 'nominatim')) as ProviderName;
   const fallback = (canonical(process.env.GEOCODER_FALLBACK)
-    || (primary === 'google' ? 'nominatim' : '')) as ProviderName | '';
+    || (primary === 'google' ? 'nominatim' : primary === 'nominatim' ? 'photon' : '')) as ProviderName | '';
   const chain = [primary, fallback].filter((provider): provider is ProviderName => Boolean(provider));
-  if (chain.some((provider) => provider !== 'google' && provider !== 'nominatim') || new Set(chain).size !== chain.length) {
+  if (chain.some((provider) => !['google', 'nominatim', 'photon'].includes(provider)) || new Set(chain).size !== chain.length) {
     throw new GeocodingError(503, 'unsupported_provider', PROVIDER_FAILURE_MESSAGE);
   }
   return chain;
@@ -348,6 +368,69 @@ async function reverseWithGoogle(latitude: number, longitude: number, startedAt:
   }
 }
 
+async function reverseWithPhoton(latitude: number, longitude: number, startedAt: number): Promise<ReverseGeocodeResult> {
+  const params = new URLSearchParams({
+    lat: latitude.toString(),
+    lon: longitude.toString(),
+    lang: 'en',
+  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(`https://photon.komoot.io/reverse?${params}`, {
+      headers: { 'User-Agent': 'AgriConnect/1.0' },
+    });
+  } catch (error) {
+    const category = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+      ? 'timeout'
+      : 'network_error';
+    throw failure('photon', category, 502, startedAt);
+  }
+  if (!response.ok) {
+    const retryAfterMs = retryAfterMilliseconds(response);
+    throw failure(
+      'photon',
+      response.status === 429 ? 'rate_limited' : response.status >= 500 ? 'provider_unavailable' : 'provider_error',
+      response.status === 429 ? 503 : 502,
+      startedAt,
+      {
+        status: response.status,
+        requestId: requestIdFrom(response),
+        ...(retryAfterMs === undefined ? {} : { retryAfterSeconds: Math.ceil(retryAfterMs / 1000) }),
+      },
+    );
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw failure('photon', 'malformed_response', 502, startedAt, { status: response.status });
+  }
+  const parsed = photonResponseSchema.safeParse(payload);
+  if (!parsed.success) throw failure('photon', 'malformed_response', 502, startedAt);
+  const properties = parsed.data.features[0]?.properties;
+  if (!properties) throw failure('photon', 'incomplete_result', 422, startedAt);
+  const city = properties.city || properties.town || properties.village || properties.locality || properties.suburb;
+  const district = properties.district || properties.county || city;
+  const line1 = [properties.housenumber, properties.street || properties.name].filter(Boolean).join(' ');
+  try {
+    return normalizedResult({
+      provider: 'photon',
+      latitude,
+      longitude,
+      city,
+      district,
+      state: properties.state,
+      pinCode: properties.postcode,
+      line1,
+      locality: properties.suburb || properties.locality || city,
+      country: properties.country,
+    });
+  } catch {
+    throw failure('photon', 'incomplete_result', 422, startedAt);
+  }
+}
+
 async function resolveWithChain(latitude: number, longitude: number): Promise<ReverseGeocodeResult> {
   const startedAt = Date.now();
   const chain = providerChain();
@@ -356,7 +439,9 @@ async function resolveWithChain(latitude: number, longitude: number): Promise<Re
     try {
       return provider === 'google'
         ? await reverseWithGoogle(latitude, longitude, startedAt)
-        : await reverseWithNominatim(latitude, longitude, startedAt);
+        : provider === 'nominatim'
+          ? await reverseWithNominatim(latitude, longitude, startedAt)
+          : await reverseWithPhoton(latitude, longitude, startedAt);
     } catch (error) {
       lastError = error instanceof GeocodingError
         ? error

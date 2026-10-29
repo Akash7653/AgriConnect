@@ -481,7 +481,7 @@ function CartDrawer({
         .then((result) => {
           if (!active) return;
           if (!result.configured) {
-            setDeliveryEstimate('We couldn’t confirm delivery to this location yet.');
+            setDeliveryEstimate('Delivery coverage has not been configured yet. An administrator must enable this area before orders can be placed.');
           } else if (result.serviceable === false) {
             setDeliveryEstimate('Delivery is not currently available for this PIN code.');
           } else if (result.serviceable === true && result.zone?.estimatedDeliveryDays) {

@@ -12,6 +12,7 @@ interface ResolvedAddress {
   locality?: string;
   lat?: number;
   lng?: number;
+  source?: 'google' | 'nominatim' | 'photon';
 }
 
 interface LocationSelectorProps {
@@ -103,7 +104,9 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
           setCanRetry(true);
           setMessage(error instanceof ApiError && error.code === 'LOCATION_INCOMPLETE_RESULT'
             ? 'We found your coordinates, but could not identify a complete address. Enter your locality and PIN code to continue.'
-            : 'Couldn’t fetch your address automatically. Enter your PIN code and locality to continue.');
+            : error instanceof ApiError && error.code === 'LOCATION_RATE_LIMITED'
+              ? 'Address lookup is temporarily busy. Your GPS coordinates are saved; enter your locality and PIN code, or try again shortly.'
+              : 'Couldn’t fetch your address automatically. Enter your PIN code and locality to continue.');
         } finally {
           window.clearTimeout(timeoutId);
           if (currentAttempt === attemptId.current) {
@@ -203,6 +206,9 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
             <p className="text-xs text-charcoal/65">
               GPS estimates your position within about {Math.max(1, Math.round(coordinates.accuracyMeters))} m. Confirm or edit the address below.
             </p>
+          )}
+          {(preview.source === 'nominatim' || preview.source === 'photon') && (
+            <p className="text-xs text-charcoal/55">Address data © OpenStreetMap contributors.</p>
           )}
           <label className="block text-xs font-medium text-charcoal/70">
             House, flat, road or landmark

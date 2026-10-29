@@ -445,6 +445,7 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
         },
         display_name: 'Test Suburb, Test State',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(Response.json({ features: [] }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         address: {
           city: 'Test City',
@@ -498,10 +499,15 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     const warningLog = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '2', 'x-request-id': 'geo-rate-limit-1' } }))
+      .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '2', 'x-request-id': 'geo-rate-limit-2' } }))
+      .mockRejectedValueOnce(Object.assign(new Error('provider timeout'), { name: 'TimeoutError' }))
       .mockRejectedValueOnce(Object.assign(new Error('provider timeout'), { name: 'TimeoutError' }))
       .mockRejectedValueOnce(new Error('network disconnected'))
+      .mockRejectedValueOnce(new Error('network disconnected'))
+      .mockResolvedValueOnce(new Response('not-json', { status: 200 }))
       .mockResolvedValueOnce(new Response('not-json', { status: 200 }))
       .mockResolvedValueOnce(Response.json({ address: {} }));
+    fetchMock.mockResolvedValueOnce(Response.json({ features: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
     try {
@@ -511,31 +517,35 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       expect(rateLimited.status).toBe(503);
       expect(rateLimited.body.code).toBe('LOCATION_RATE_LIMITED');
       expect(rateLimited.headers['retry-after']).toBe('2');
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
 
       const timedOut = await request(app)
         .post('/api/location/reverse-geocode')
         .send({ latitude: 18.5, longitude: 73.8 });
       expect(timedOut.status).toBe(502);
       expect(timedOut.body.code).toBe('LOCATION_TIMEOUT');
+      expect(fetchMock).toHaveBeenCalledTimes(4);
 
       const networkFailure = await request(app)
         .post('/api/location/reverse-geocode')
         .send({ latitude: 18.5, longitude: 73.8 });
       expect(networkFailure.status).toBe(502);
       expect(networkFailure.body.code).toBe('LOCATION_NETWORK_ERROR');
+      expect(fetchMock).toHaveBeenCalledTimes(6);
 
       const malformedResult = await request(app)
         .post('/api/location/reverse-geocode')
         .send({ latitude: 18.5, longitude: 73.8 });
       expect(malformedResult.status).toBe(502);
       expect(malformedResult.body.code).toBe('LOCATION_MALFORMED_RESPONSE');
+      expect(fetchMock).toHaveBeenCalledTimes(8);
 
       const incompleteResult = await request(app)
         .post('/api/location/reverse-geocode')
         .send({ latitude: 18.5, longitude: 73.8 });
       expect(incompleteResult.status).toBe(422);
       expect(incompleteResult.body.code).toBe('LOCATION_INCOMPLETE_RESULT');
+      expect(fetchMock).toHaveBeenCalledTimes(10);
     } finally {
       vi.unstubAllGlobals();
       warningLog.mockRestore();

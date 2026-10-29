@@ -209,7 +209,7 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
       res.status(503).json({
         success: false,
         code: 'SERVICEABILITY_NOT_CONFIGURED',
-        message: 'Delivery zones are not configured yet. Please try again later.',
+        message: 'Delivery coverage is not configured. An administrator must enable service zones before orders can be placed.',
       });
       return;
     }
