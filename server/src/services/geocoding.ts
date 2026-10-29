@@ -179,6 +179,7 @@ function providerChain(): ProviderName[] {
   const fallback = (canonical(process.env.GEOCODER_FALLBACK)
     || (primary === 'google' ? 'nominatim' : primary === 'nominatim' ? 'photon' : '')) as ProviderName | '';
   const chain = [primary, fallback].filter((provider): provider is ProviderName => Boolean(provider));
+  if (!chain.includes('photon')) chain.push('photon');
   if (chain.some((provider) => !['google', 'nominatim', 'photon'].includes(provider)) || new Set(chain).size !== chain.length) {
     throw new GeocodingError(503, 'unsupported_provider', PROVIDER_FAILURE_MESSAGE);
   }

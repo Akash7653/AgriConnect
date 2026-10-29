@@ -119,6 +119,36 @@ describe('reverse geocoding service', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('photon.komoot.io/reverse');
   });
 
+  it('tries Photon after Google and Nominatim are both rate-limited', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(Response.json({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: {
+            city: 'Medchal',
+            county: 'Medchal mandal',
+            state: 'Telangana',
+            postcode: '501400',
+            country: 'India',
+          },
+          geometry: { type: 'Point', coordinates: [78.4798667, 17.63061] },
+        }],
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(reverseGeocode(17.629, 78.481)).resolves.toMatchObject({
+      city: 'Medchal',
+      district: 'Medchal mandal',
+      state: 'Telangana',
+      pinCode: '501400',
+      source: 'photon',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('caches successful results for rounded coordinate keys', async () => {
     const fetchMock = vi.fn(async () => Response.json(googleAddress));
     vi.stubGlobal('fetch', fetchMock);
