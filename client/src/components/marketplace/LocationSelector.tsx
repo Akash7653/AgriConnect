@@ -35,19 +35,52 @@ const emptyAddress: ResolvedAddress = {
   locality: '',
 };
 
+async function reverseGeocodeWithPhoton(latitude: number, longitude: number, signal: AbortSignal): Promise<ResolvedAddress> {
+  const params = new URLSearchParams({
+    lat: latitude.toString(),
+    lon: longitude.toString(),
+    lang: 'en',
+  });
+  const response = await fetch(`https://photon.komoot.io/reverse?${params}`, { signal });
+  if (!response.ok) throw new Error(`Photon returned ${response.status}.`);
+  const payload = await response.json() as {
+    features?: Array<{ properties?: Record<string, unknown> }>;
+  };
+  const properties = payload.features?.[0]?.properties;
+  if (!properties) throw new Error('Photon returned no address.');
+
+  const text = (...values: unknown[]) => values.find(
+    (value): value is string => typeof value === 'string' && value.trim().length > 0,
+  )?.trim();
+  const city = text(properties.city, properties.town, properties.village, properties.locality, properties.suburb);
+  const district = text(properties.district, properties.county, city);
+  const state = text(properties.state);
+  const pinCode = text(properties.postcode);
+  if (!city || !district || !state || !pinCode || !/^\d{6}$/.test(pinCode)) {
+    throw new Error('Photon returned an incomplete address.');
+  }
+  const line1 = [text(properties.housenumber), text(properties.street, properties.name)].filter(Boolean).join(' ');
+  const locality = text(properties.suburb, properties.locality, city) ?? city;
+
+  return {
+    city,
+    district,
+    state,
+    pinCode,
+    displayName: [line1, locality, city, state, pinCode].filter(Boolean).join(', '),
+    line1,
+    locality,
+    lat: latitude,
+    lng: longitude,
+    source: 'photon',
+    ...(text(properties.country) ? { country: text(properties.country) } : {}),
+  };
+}
+
 async function reverseGeocode(latitude: number, longitude: number, signal: AbortSignal): Promise<{ address: ResolvedAddress }> {
   if (typeof window !== 'undefined' && /^https?:$/.test(window.location?.protocol ?? '')) {
     try {
-      const response = await fetch('/api/reverse-geocode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ latitude, longitude }),
-        signal,
-      });
-      if (!response.ok) throw new Error(`Location proxy returned ${response.status}.`);
-      const result = await response.json() as { address?: ResolvedAddress };
-      if (result.address) return { address: result.address };
-      throw new Error('Location proxy returned an incomplete response.');
+      return { address: await reverseGeocodeWithPhoton(latitude, longitude, signal) };
     } catch (error) {
       if (signal.aborted) throw error;
     }

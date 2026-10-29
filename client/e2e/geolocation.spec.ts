@@ -118,26 +118,26 @@ test('granted geolocation automatically fills checkout and saves the buyer addre
   }
 });
 
-test('uses the same-origin Vercel geocoder before the Render API', async ({ browser }) => {
+test('uses Photon before the Render API', async ({ browser }) => {
   const context = await browser.newContext({
     permissions: ['geolocation'],
     geolocation: { latitude: 17.629, longitude: 78.481 },
   });
   try {
     const { page, getReverseGeocodeRequests } = await prepareMarketplace(context);
-    await page.route('**/api/reverse-geocode', (route) => route.fulfill({
+    await page.route('https://photon.komoot.io/reverse**', (route) => route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        success: true,
-        address: {
-          city: 'Medchal',
-          district: 'Medchal mandal',
-          state: 'Telangana',
-          pinCode: '501400',
-          displayName: 'Medchal Station, Medchal, Telangana, 501400',
-          source: 'photon',
-        },
+        features: [{
+          properties: {
+            city: 'Medchal',
+            county: 'Medchal mandal',
+            state: 'Telangana',
+            postcode: '501400',
+            street: 'Medchal Station',
+          },
+        }],
       }),
     }));
 
@@ -187,7 +187,7 @@ test('location detection requests a fresh high-accuracy position', async ({ brow
   }
 });
 
-test('location detection keeps manual entry available when the API geocoder is rate-limited', async ({ browser }) => {
+test('location detection keeps manual entry available when Photon and the API are unavailable', async ({ browser }) => {
   const context = await browser.newContext({
     permissions: ['geolocation'],
     geolocation: { latitude: 17.629, longitude: 78.481 },
@@ -205,13 +205,13 @@ test('location detection keeps manual entry available when the API geocoder is r
     }));
     await page.route('https://photon.komoot.io/reverse**', async (route) => {
       photonRequests += 1;
-      await route.fulfill({ status: 200, body: '{}' });
+      await route.fulfill({ status: 503, body: 'Provider unavailable' });
     });
 
     await page.getByRole('button', { name: 'Detect my location' }).click();
     await expect(page.getByText(/Address lookup is temporarily busy/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Enter address manually' })).toBeVisible();
-    expect(photonRequests).toBe(0);
+    expect(photonRequests).toBe(1);
   } finally {
     await context.close();
   }
