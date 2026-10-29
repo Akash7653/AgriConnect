@@ -118,6 +118,37 @@ test('granted geolocation automatically fills checkout and saves the buyer addre
   }
 });
 
+test('uses the same-origin Vercel geocoder before the Render API', async ({ browser }) => {
+  const context = await browser.newContext({
+    permissions: ['geolocation'],
+    geolocation: { latitude: 17.629, longitude: 78.481 },
+  });
+  try {
+    const { page, getReverseGeocodeRequests } = await prepareMarketplace(context);
+    await page.route('**/api/reverse-geocode', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        address: {
+          city: 'Medchal',
+          district: 'Medchal mandal',
+          state: 'Telangana',
+          pinCode: '501400',
+          displayName: 'Medchal Station, Medchal, Telangana, 501400',
+          source: 'photon',
+        },
+      }),
+    }));
+
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText('Location found. Confirm your delivery address.')).toBeVisible();
+    expect(getReverseGeocodeRequests()).toBe(0);
+  } finally {
+    await context.close();
+  }
+});
+
 test('location detection requests a fresh high-accuracy position', async ({ browser }) => {
   const context = await browser.newContext({
     permissions: ['geolocation'],

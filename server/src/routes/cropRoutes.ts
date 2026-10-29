@@ -7,6 +7,7 @@ import {
   getFarmerListings,
   updateListing,
   deleteListing,
+  getProductImage,
   uploadListingImage,
   removeListingImage,
 } from '../controllers/cropController.js';
@@ -45,6 +46,7 @@ router.get('/', authenticateToken, requireRole(USER_ROLES.BUYER, USER_ROLES.BUSI
 router.get('/detail/:id', authenticateToken, requireRole(USER_ROLES.BUYER, USER_ROLES.BUSINESS), getListingById);
 
 // Farmer specific
+router.get('/images/:publicId', getProductImage);
 router.get('/my-crops', authenticateToken, requireRole(USER_ROLES.FARMER), getFarmerListings);
 router.post('/', authenticateToken, createListing);
 router.put('/:id', authenticateToken, updateListing);

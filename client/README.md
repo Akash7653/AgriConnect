@@ -6,6 +6,8 @@ This folder contains both the Vite web client and Expo native app. The web app l
 
 Run the web client with `npm run dev`, type-check it with `npm run typecheck`, and build it with `npm run build`. Set `VITE_API_BASE_URL` to the API URL including `/api` when it differs from the configured deployment.
 
+On Vercel, the web app uses `api/reverse-geocode.js` as a same-origin Photon proxy for location lookup, then falls back to the configured backend. Product images use Cloudinary when all three Cloudinary credentials are configured on the backend; otherwise they are stored persistently in MongoDB GridFS.
+
 ## Expo native app
 
 1. Copy `.env.example` to `.env`. The native app defaults to the deployed AgriConnect API; set `EXPO_PUBLIC_API_BASE_URL` to another backend URL including `/api` when needed.

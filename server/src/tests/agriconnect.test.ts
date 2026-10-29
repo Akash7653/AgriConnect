@@ -288,6 +288,37 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
     }
   });
 
+  it('2b. Should persist and serve product images through MongoDB when Cloudinary is not configured', async () => {
+    vi.stubEnv('CLOUDINARY_CLOUD_NAME', '');
+    vi.stubEnv('CLOUDINARY_API_KEY', '');
+    vi.stubEnv('CLOUDINARY_API_SECRET', '');
+    const imageBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+
+    try {
+      const upload = await request(app)
+        .post(`/api/crops/${listingId}/images`)
+        .set('Authorization', `Bearer ${farmerToken}`)
+        .attach('image', imageBuffer, { filename: 'crop.png', contentType: 'image/png' });
+      expect(upload.status).toBe(201);
+      expect(upload.body.image.publicId).toMatch(/^gridfs:[a-f\d]{24}$/i);
+
+      const imageUrl = new URL(upload.body.image.url);
+      const download = await request(app).get(imageUrl.pathname);
+      expect(download.status).toBe(200);
+      expect(download.headers['content-type']).toContain('image/png');
+      expect(download.body).toEqual(imageBuffer);
+
+      const remove = await request(app)
+        .delete(`/api/crops/${listingId}/images`)
+        .set('Authorization', `Bearer ${farmerToken}`)
+        .send({ publicId: upload.body.image.publicId });
+      expect(remove.status).toBe(200);
+      expect((await request(app).get(imageUrl.pathname)).status).toBe(404);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('3. Should reject direct order creation without verified payment', async () => {
     const listingBefore = await CropListing.findById(listingId);
     const orderRes = await request(app)

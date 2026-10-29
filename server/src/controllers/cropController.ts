@@ -7,7 +7,7 @@ import { USER_ROLES } from '../config/constants.js';
 import { RealtimeNotifier } from '../socket/index.js';
 import { User } from '../models/User.js';
 import { SEEDED_DEMO_ACCOUNT_EMAILS } from '../config/demoAccounts.js';
-import { deleteProductImage, uploadProductImage } from '../services/imageStorage.js';
+import { deleteProductImage, openProductImage, uploadProductImage } from '../services/imageStorage.js';
 
 export const createListingSchema = z.object({
   cropName: z.string().min(2, 'Crop name is required'),
@@ -385,7 +385,14 @@ export async function uploadListingImage(req: AuthRequest, res: Response): Promi
         return;
       }
 
-      const image = await uploadProductImage(req.file.buffer, req.file.mimetype, req.user._id.toString(), listing._id.toString());
+      const apiOrigin = `${req.protocol}://${req.get('host')}`;
+      const image = await uploadProductImage(
+        req.file.buffer,
+        req.file.mimetype,
+        req.user._id.toString(),
+        listing._id.toString(),
+        apiOrigin,
+      );
       listing.imageAssets.push(image);
       listing.images.push(image.url);
       await listing.save();
@@ -397,12 +404,45 @@ export async function uploadListingImage(req: AuthRequest, res: Response): Promi
       res.status(201).json({ success: true, image, listing });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Image upload failed.';
-      const notConfigured = message.includes('not configured');
+      const notConfigured = message.includes('not configured') || message.includes('configuration is incomplete');
       res.status(notConfigured ? 503 : 502).json({ success: false, message });
     }
   }
 
-export async function removeListingImage(req: AuthRequest, res: Response): Promise<void> {
+  export async function getProductImage(req: Request, res: Response): Promise<void> {
+    try {
+      const image = await openProductImage(req.params.publicId);
+      if (!image) {
+        res.status(404).json({ success: false, message: 'Product image was not found.' });
+        return;
+      }
+
+      res.set({
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-Length': String(image.bytes),
+        'Content-Type': image.contentType,
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      image.stream.on('error', (error) => {
+        console.error('[crops] Product image stream failed', {
+          publicId: req.params.publicId,
+          message: error.message,
+        });
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy(error);
+      });
+      image.stream.pipe(res);
+    } catch (error) {
+      console.error('[crops] Product image retrieval failed', {
+        publicId: req.params.publicId,
+        message: error instanceof Error ? error.message : 'Unknown storage error',
+      });
+      res.status(500).json({ success: false, message: 'Product image could not be loaded.' });
+    }
+  }
+
+  export async function removeListingImage(req: AuthRequest, res: Response): Promise<void> {
     try {
       if (!req.user || !canManageListingsAsFarmer(req.user)) {
         res.status(403).json({ success: false, message: 'Only approved, active farmers can remove product images.' });

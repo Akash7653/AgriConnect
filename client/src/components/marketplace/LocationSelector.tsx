@@ -35,6 +35,31 @@ const emptyAddress: ResolvedAddress = {
   locality: '',
 };
 
+async function reverseGeocode(latitude: number, longitude: number, signal: AbortSignal): Promise<{ address: ResolvedAddress }> {
+  if (typeof window !== 'undefined' && /^https?:$/.test(window.location?.protocol ?? '')) {
+    try {
+      const response = await fetch('/api/reverse-geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latitude, longitude }),
+        signal,
+      });
+      if (!response.ok) throw new Error(`Location proxy returned ${response.status}.`);
+      const result = await response.json() as { address?: ResolvedAddress };
+      if (result.address) return { address: result.address };
+      throw new Error('Location proxy returned an incomplete response.');
+    } catch (error) {
+      if (signal.aborted) throw error;
+    }
+  }
+
+  return request<{ address: ResolvedAddress }>('/location/reverse-geocode', {
+    method: 'POST',
+    body: JSON.stringify({ latitude, longitude }),
+    signal,
+  });
+}
+
 export function LocationSelector({ onResolved }: LocationSelectorProps) {
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -82,11 +107,7 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
         controller.current = currentController;
         const timeoutId = window.setTimeout(() => currentController.abort(), 12_000);
         try {
-          const result = await request<{ address: ResolvedAddress }>('/location/reverse-geocode', {
-            method: 'POST',
-            body: JSON.stringify({ latitude: position.lat, longitude: position.lng }),
-            signal: currentController.signal,
-          });
+          const result = await reverseGeocode(position.lat, position.lng, currentController.signal);
           if (currentAttempt !== attemptId.current) return;
           const address = result.address;
           setPreview({
