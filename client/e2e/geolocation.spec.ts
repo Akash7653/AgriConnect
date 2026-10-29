@@ -12,6 +12,11 @@ async function prepareMarketplace(
     state: 'Maharashtra',
     pinCode: '411001',
     displayName: 'Pune, Maharashtra',
+  },
+  serviceabilityResult = {
+    configured: true,
+    serviceable: true,
+    zone: { estimatedDeliveryDays: 2 },
   }
 ) {
   await context.addInitScript((address) => {
@@ -53,7 +58,7 @@ async function prepareMarketplace(
   await context.route(`${apiOrigin}/api/serviceability**`, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ configured: false, serviceable: false }),
+    body: JSON.stringify(serviceabilityResult),
   }));
   await context.route(`${apiOrigin}/api/location/reverse-geocode`, (route) => {
     reverseGeocodeRequests += 1;
@@ -146,6 +151,59 @@ test('location detection requests a fresh high-accuracy position', async ({ brow
       timeout: 30000,
       maximumAge: 0,
     });
+  } finally {
+    await context.close();
+  }
+});
+
+test('location detection keeps manual entry available when the API geocoder is rate-limited', async ({ browser }) => {
+  const context = await browser.newContext({
+    permissions: ['geolocation'],
+    geolocation: { latitude: 17.629, longitude: 78.481 },
+  });
+  try {
+    const { page } = await prepareMarketplace(context);
+    let photonRequests = 0;
+    await page.route(`${apiOrigin}/api/location/reverse-geocode`, (route) => route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 'LOCATION_RATE_LIMITED',
+        message: 'Address lookup is temporarily unavailable.',
+      }),
+    }));
+    await page.route('https://photon.komoot.io/reverse**', async (route) => {
+      photonRequests += 1;
+      await route.fulfill({ status: 200, body: '{}' });
+    });
+
+    await page.getByRole('button', { name: 'Detect my location' }).click();
+    await expect(page.getByText(/Address lookup is temporarily busy/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Enter address manually' })).toBeVisible();
+    expect(photonRequests).toBe(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test('checkout stays disabled while delivery coverage is not configured', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    const { page } = await prepareMarketplace(
+      context,
+      200,
+      {
+        street: 'Medchal Station',
+        villageOrCity: 'Medchal',
+        district: 'Medchal',
+        state: 'Telangana',
+        pinCode: '501401',
+      },
+      undefined,
+      { configured: false, serviceable: null }
+    );
+    await expect(page.getByText(/Delivery coverage has not been configured yet/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delivery unavailable' })).toBeDisabled();
   } finally {
     await context.close();
   }

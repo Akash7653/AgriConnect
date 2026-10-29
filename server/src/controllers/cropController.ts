@@ -47,6 +47,7 @@ const listingUpdateSchema = z.object({
   category: z.enum(['Vegetables', 'Fruits', 'Grains & Cereals', 'Pulses', 'Spices', 'Greens & Herbs', 'Organic Special']).optional(),
   description: z.string().min(10).optional(),
   pricePerUnitPaise: z.coerce.number().int().min(100).optional(),
+  unit: z.enum(['kg', 'quintal', 'box', 'bunch', 'crate']).optional(),
   availableQuantity: z.coerce.number().int().min(0).optional(),
   qualityGrade: z.enum(['A+', 'A', 'B+', 'B']).optional(),
   status: z.enum(['active', 'paused', 'archived']).optional(),
@@ -311,6 +312,7 @@ export async function updateListing(req: AuthRequest, res: Response): Promise<vo
     if (data.category !== undefined) listing.category = data.category;
     if (data.description !== undefined) listing.description = data.description;
     if (data.pricePerUnitPaise !== undefined) listing.pricePerUnitPaise = data.pricePerUnitPaise;
+    if (data.unit !== undefined) listing.unit = data.unit;
     if (data.availableQuantity !== undefined) {
       const quantity = data.availableQuantity;
       if (!Number.isFinite(quantity) || quantity < 0) {

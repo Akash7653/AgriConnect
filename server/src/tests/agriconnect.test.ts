@@ -184,6 +184,27 @@ describe('AgriConnect SaaS Platform - Integration & Concurrency Tests', () => {
       .send({ availableQuantity: 25 });
     expect(stockUpdate.status).toBe(200);
     expect(stockUpdate.body.listing.availableQuantity).toBe(25);
+
+    const listingEdit = await request(app)
+      .put(`/api/crops/${listingId}`)
+      .set('Authorization', `Bearer ${farmerToken}`)
+      .send({
+        cropName: 'Organic Shimla Green Capsicum',
+        category: 'Vegetables',
+        description: 'Crisp green capsicum grown under naturally ventilated polyhouse.',
+        pricePerUnitPaise: 4500,
+        unit: 'crate',
+        availableQuantity: 25,
+        minOrderQuantity: 1,
+        harvestDate: new Date().toISOString(),
+        status: 'active',
+        village: 'Dharmavaram',
+        district: 'Anantapur',
+        state: 'Andhra Pradesh',
+        pinCode: '515671',
+      });
+    expect(listingEdit.status).toBe(200);
+    expect(listingEdit.body.listing.unit).toBe('crate');
   });
 
   it('2b. Should prevent unapproved farmers from publishing products', async () => {

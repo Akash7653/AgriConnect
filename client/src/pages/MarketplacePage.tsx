@@ -429,6 +429,9 @@ function CartDrawer({
   const profileId = useRef(profile?.id);
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('razorpay');
   const [deliveryEstimate, setDeliveryEstimate] = useState('');
+  const [deliveryCoverageStatus, setDeliveryCoverageStatus] = useState<
+    'unknown' | 'checking' | 'available' | 'unavailable' | 'unconfigured'
+  >('unknown');
   const [locationSaveError, setLocationSaveError] = useState('');
 
   useEffect(() => {
@@ -470,8 +473,10 @@ function CartDrawer({
     let active = true;
     if (!checkoutOpen || address.city.trim().length < 2 || address.state.trim().length < 2 || address.pinCode.trim().length < 5) {
       setDeliveryEstimate('');
+      setDeliveryCoverageStatus('unknown');
       return;
     }
+    setDeliveryCoverageStatus('checking');
     const timeout = window.setTimeout(() => {
       getLocationServiceability({
         city: address.city.trim(),
@@ -481,22 +486,31 @@ function CartDrawer({
         .then((result) => {
           if (!active) return;
           if (!result.configured) {
+            setDeliveryCoverageStatus('unconfigured');
             setDeliveryEstimate('Delivery coverage has not been configured yet. An administrator must enable this area before orders can be placed.');
           } else if (result.serviceable === false) {
+            setDeliveryCoverageStatus('unavailable');
             setDeliveryEstimate('Delivery is not currently available for this PIN code.');
           } else if (result.serviceable === true && result.zone?.estimatedDeliveryDaysMin && result.zone?.estimatedDeliveryDaysMax) {
+            setDeliveryCoverageStatus('available');
             setDeliveryEstimate(`Estimated delivery within ${result.zone.estimatedDeliveryDaysMin}–${result.zone.estimatedDeliveryDaysMax} days after order confirmation. Timing may vary.`);
           } else if (result.serviceable === true && result.zone?.estimatedDeliveryDays) {
+            setDeliveryCoverageStatus('available');
             const days = result.zone.estimatedDeliveryDays;
             setDeliveryEstimate(`Estimated delivery within ${days} ${days === 1 ? 'day' : 'days'} after order confirmation. Timing may vary.`);
           } else if (result.serviceable === true) {
+            setDeliveryCoverageStatus('available');
             setDeliveryEstimate('Delivery is available, but an estimated delivery time is not configured.');
           } else {
+            setDeliveryCoverageStatus('unknown');
             setDeliveryEstimate('We couldn’t confirm delivery to this location yet.');
           }
         })
         .catch(() => {
-          if (active) setDeliveryEstimate('Could not check the delivery estimate. Availability will be confirmed when the order is placed.');
+          if (active) {
+            setDeliveryCoverageStatus('unknown');
+            setDeliveryEstimate('Could not check the delivery estimate. Availability will be confirmed when the order is placed.');
+          }
         });
     }, 350);
     return () => {
@@ -591,7 +605,19 @@ function CartDrawer({
                   }}
                 />
                 {locationSaveError && <p role="alert" className="text-xs text-red-700">{locationSaveError}</p>}
-                {deliveryEstimate && <p role="status" className="rounded-lg bg-agri-emerald/10 px-3 py-2 text-xs text-forest">{deliveryEstimate}</p>}
+                {deliveryEstimate && (
+                  <p
+                    role={deliveryCoverageStatus === 'unconfigured' || deliveryCoverageStatus === 'unavailable' ? 'alert' : 'status'}
+                    className={classNames(
+                      'rounded-lg px-3 py-2 text-xs',
+                      deliveryCoverageStatus === 'unconfigured' || deliveryCoverageStatus === 'unavailable'
+                        ? 'bg-red-50 text-red-700'
+                        : 'bg-agri-emerald/10 text-forest'
+                    )}
+                  >
+                    {deliveryEstimate}
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   {([
                     ['recipientName', 'Full name'],
@@ -653,13 +679,15 @@ function CartDrawer({
                 </div>
                 <button
                   type="submit"
-                  disabled={checkoutBusy}
+                  disabled={checkoutBusy || deliveryCoverageStatus === 'checking' || deliveryCoverageStatus === 'unconfigured' || deliveryCoverageStatus === 'unavailable'}
                   className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-agri-emerald py-3.5 font-semibold text-forest hover:bg-forest hover:text-ivory disabled:opacity-50 transition-colors"
                 >
                   {checkoutBusy && <Loader2 className="h-4 w-4 animate-spin" />}
                   {checkoutBusy
                     ? paymentMethod === 'cod' ? 'Placing order…' : 'Preparing secure checkout…'
-                    : paymentMethod === 'cod' ? 'Place cash-on-delivery order' : 'Continue to secure payment'}
+                    : deliveryCoverageStatus === 'unconfigured' || deliveryCoverageStatus === 'unavailable'
+                      ? 'Delivery unavailable'
+                      : paymentMethod === 'cod' ? 'Place cash-on-delivery order' : 'Continue to secure payment'}
                 </button>
               </form>
             ) : items.length === 0 ? (
