@@ -103,7 +103,7 @@ describe('signup email OTP flow', () => {
     expect(user?.emailVerified).toBe(true);
     expect(user?.passwordHash).not.toBe(passwords);
 
-    const login = await request(app).post('/api/auth/login').send({ email, password: passwords });
+    const login = await request(app).post('/api/auth/login').send({ email: `  ${email.toUpperCase()}  `, password: passwords });
     expect(login.status).toBe(200);
   });
 

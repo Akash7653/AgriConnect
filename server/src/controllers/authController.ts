@@ -42,7 +42,7 @@ export const registerSchema = z.object({
 });
 
 export const loginSchema = z.object({
-  email: z.string().email().max(254),
+  email: z.string().trim().toLowerCase().email().max(254),
   password: z.string().min(1).max(128),
 }).strict();
 
@@ -139,14 +139,14 @@ export async function login(req: Request, res: Response): Promise<void> {
   try {
     const data = loginSchema.parse(req.body);
 
-    if (process.env.NODE_ENV === 'production' && SEEDED_DEMO_ACCOUNT_EMAILS.includes(data.email.toLowerCase() as typeof SEEDED_DEMO_ACCOUNT_EMAILS[number])) {
+    if (process.env.NODE_ENV === 'production' && SEEDED_DEMO_ACCOUNT_EMAILS.includes(data.email as typeof SEEDED_DEMO_ACCOUNT_EMAILS[number])) {
       res.status(401).json({ success: false, message: 'Invalid email or password' });
       return;
     }
 
-    const user = await User.findOne({ email: data.email.toLowerCase() });
+    const user = await User.findOne({ email: data.email });
     if (!user) {
-      const pending = await PendingSignup.findOne({ email: data.email.toLowerCase() }).select('+passwordHash');
+      const pending = await PendingSignup.findOne({ email: data.email }).select('+passwordHash');
       if (pending && await bcrypt.compare(data.password, pending.passwordHash)) {
         res.status(403).json({
           success: false,
