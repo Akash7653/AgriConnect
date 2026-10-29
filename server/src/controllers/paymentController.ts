@@ -19,6 +19,9 @@ import { checkServiceability } from '../services/serviceability.js';
 import { queueOrderConfirmation } from '../services/email.js';
 import { Refund } from '../models/Refund.js';
 import { finalizeRefund } from '../services/refunds.js';
+import { User } from '../models/User.js';
+import mongoose from 'mongoose';
+import { SEEDED_DEMO_ACCOUNT_EMAILS } from '../config/demoAccounts.js';
 
 async function ensureSalePayoutLedgers(order: IOrder | null, buyerName?: string) {
   if (!order || order.payment.gateway === 'cod_verified' || order.payment.status !== 'captured') return;
@@ -87,64 +90,135 @@ export const createPaymentOrderSchema = z.object({
   items: z
     .array(
       z.object({
-        listingId: z.string(),
-        quantity: z.number().min(1),
-      })
+        listingId: z.string().refine(mongoose.isValidObjectId, 'Invalid product ID.'),
+        quantity: z.number().int().min(1).max(100_000),
+      }).strict()
     )
     .min(1, 'Order must contain at least one item'),
   deliveryAddress: z.object({
-    recipientName: z.string().min(2),
-    phone: z.string().min(10),
-    addressLine1: z.string().min(3),
-    addressLine2: z.string().optional(),
-    city: z.string().min(2),
-    district: z.string().min(2),
-    state: z.string().min(2),
-    pinCode: z.string().min(5),
-  }),
+    recipientName: z.string().trim().min(2).max(100),
+    phone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/),
+    addressLine1: z.string().trim().min(3).max(120),
+    addressLine2: z.string().trim().max(120).optional(),
+    city: z.string().trim().min(2).max(80),
+    district: z.string().trim().min(2).max(80),
+    state: z.string().trim().min(2).max(80),
+    pinCode: z.string().trim().regex(/^\d{6}$/),
+  }).strict(),
   deliverySlot: z.object({
-    date: z.string(),
-    timeWindow: z.string().default('07:00 AM - 11:00 AM'),
-  }),
+    date: z.string().date(),
+    timeWindow: z.string().trim().min(1).max(40).default('07:00 AM - 11:00 AM'),
+  }).strict(),
   paymentMethod: z.enum(['razorpay', 'cod']).default('razorpay'),
-  idempotencyKey: z.string().optional(),
-});
+  idempotencyKey: z.string().trim().min(16).max(120),
+}).strict();
 
 export async function createPaymentOrder(req: AuthRequest, res: Response): Promise<void> {
   const reservedItems: Array<{ listingId: string; quantity: number }> = [];
   let orderCreated = false;
+  const releaseReservedItems = async () => {
+    for (const reserved of reservedItems) {
+      const released = await CropListing.updateOne(
+        { _id: reserved.listingId, reservedQuantity: { $gte: reserved.quantity } },
+        {
+          $inc: {
+            availableQuantity: reserved.quantity,
+            reservedQuantity: -reserved.quantity,
+          },
+        },
+      );
+      if (released.modifiedCount !== 1) {
+        throw new Error(`Could not safely release reserved stock for listing ${reserved.listingId}.`);
+      }
+    }
+    reservedItems.length = 0;
+  };
 
   try {
     if (!req.user) {
       res.status(401).json({ success: false, message: 'Authentication required' });
       return;
     }
-
-    const data = createPaymentOrderSchema.parse(req.body);
-    if (data.idempotencyKey) {
-      const existingOrder = await Order.findOne({
-        idempotencyKey: data.idempotencyKey,
-        buyerId: req.user._id,
-      });
-      if (existingOrder) {
-        res.json({
-          success: true,
-          message: 'Order already processed (idempotent)',
-          orderId: existingOrder._id,
-          orderNumber: existingOrder.orderNumber,
-          paymentMethod: existingOrder.payment.gateway === 'cod_verified' ? 'cod' : 'razorpay',
-          amountPaise: existingOrder.pricing.finalPayablePaise,
-          currency: 'INR',
-          ...(existingOrder.payment.paymentOrderId ? { razorpayOrderId: existingOrder.payment.paymentOrderId } : {}),
-          ...(existingOrder.payment.gateway !== 'cod_verified' ? { keyId: process.env.RAZORPAY_KEY_ID } : {}),
-        });
-        return;
-      }
+    if (req.user.role !== 'buyer' && req.user.role !== 'business') {
+      res.status(403).json({ success: false, message: 'Only buyer and business accounts can place orders.' });
+      return;
     }
 
+    const data = createPaymentOrderSchema.parse(req.body);
+    const existingOrder = await Order.findOne({
+      idempotencyKey: data.idempotencyKey,
+      buyerId: req.user._id,
+    });
+    if (existingOrder) {
+      res.json({
+        success: true,
+        message: 'Order already processed (idempotent)',
+        orderId: existingOrder._id,
+        orderNumber: existingOrder.orderNumber,
+        paymentMethod: existingOrder.payment.gateway === 'cod_verified' ? 'cod' : 'razorpay',
+        amountPaise: existingOrder.pricing.finalPayablePaise,
+        currency: 'INR',
+        ...(existingOrder.payment.paymentOrderId ? { razorpayOrderId: existingOrder.payment.paymentOrderId } : {}),
+        ...(existingOrder.payment.gateway !== 'cod_verified' ? { keyId: process.env.RAZORPAY_KEY_ID } : {}),
+      });
+      return;
+    }
+
+    const uniqueQuantities = new Map<string, number>();
+    for (const item of data.items) {
+      uniqueQuantities.set(item.listingId, (uniqueQuantities.get(item.listingId) ?? 0) + item.quantity);
+    }
+    const normalizedItems = [...uniqueQuantities].map(([listingId, quantity]) => ({
+      listingId,
+      quantity,
+    }));
+    if (normalizedItems.some((item) => item.quantity > 100_000)) {
+      res.status(400).json({ success: false, message: 'Requested product quantity exceeds the order limit.' });
+      return;
+    }
+
+    const requestedListings = await CropListing.find({
+      _id: { $in: normalizedItems.map((item) => item.listingId) },
+      status: 'active',
+    }).select('_id farmerId minOrderQuantity').lean();
+    if (requestedListings.length !== normalizedItems.length) {
+      res.status(409).json({ success: false, message: 'One or more products are unavailable. Refresh your cart and try again.' });
+      return;
+    }
+    const listingById = new Map(requestedListings.map((listing) => [listing._id.toString(), listing]));
+    if (normalizedItems.some((item) => item.quantity < (listingById.get(item.listingId)?.minOrderQuantity ?? 1))) {
+      res.status(400).json({ success: false, message: 'One or more product quantities are below the seller minimum order quantity.' });
+      return;
+    }
+    const sellerIds = [...new Set(requestedListings.map((listing) => listing.farmerId.toString()))];
+    const approvedSellers = await User.find({
+      _id: { $in: sellerIds },
+      role: 'farmer',
+      isVerified: true,
+      status: 'active',
+      ...(process.env.NODE_ENV === 'production' ? { email: { $nin: SEEDED_DEMO_ACCOUNT_EMAILS } } : {}),
+    }).select('_id').lean();
+    if (approvedSellers.length !== sellerIds.length) {
+      res.status(409).json({ success: false, message: 'One or more sellers are not approved to fulfill orders.' });
+      return;
+    }
+    const approvedSellerIds = approvedSellers.map((seller) => seller._id);
+
     const serviceability = await checkServiceability(data.deliveryAddress);
-    if (serviceability.configured && !serviceability.serviceable) {
-      res.status(422).json({ success: false, message: serviceability.message });
+    if (!serviceability.configured) {
+      res.status(503).json({
+        success: false,
+        code: 'SERVICEABILITY_NOT_CONFIGURED',
+        message: 'Delivery zones are not configured yet. Please try again later.',
+      });
+      return;
+    }
+    if (!serviceability.serviceable) {
+      res.status(422).json({
+        success: false,
+        code: 'DELIVERY_UNAVAILABLE',
+        message: serviceability.message,
+      });
       return;
     }
 
@@ -152,12 +226,13 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
     const orderItems: IOrderItem[] = [];
     let grossProductValuePaise = 0;
 
-    for (const item of data.items) {
+    for (const item of normalizedItems) {
       const listing = await CropListing.findOneAndUpdate(
         {
           _id: item.listingId,
           availableQuantity: { $gte: item.quantity },
           status: 'active',
+          farmerId: { $in: approvedSellerIds },
         },
         {
           $inc: {
@@ -170,13 +245,25 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
 
       if (!listing) {
         // Rollback already reserved items
-        for (const reserved of reservedItems) {
-          await CropListing.findByIdAndUpdate(reserved.listingId, {
-            $inc: {
-              availableQuantity: reserved.quantity,
-              reservedQuantity: -reserved.quantity,
-            },
+        await releaseReservedItems();
+
+        const concurrentOrder = await Order.findOne({
+          idempotencyKey: data.idempotencyKey,
+          buyerId: req.user._id,
+        });
+        if (concurrentOrder) {
+          res.status(200).json({
+            success: true,
+            message: 'Order already processed (idempotent)',
+            orderId: concurrentOrder._id,
+            orderNumber: concurrentOrder.orderNumber,
+            paymentMethod: concurrentOrder.payment.gateway === 'cod_verified' ? 'cod' : 'razorpay',
+            amountPaise: concurrentOrder.pricing.finalPayablePaise,
+            currency: 'INR',
+            ...(concurrentOrder.payment.paymentOrderId ? { razorpayOrderId: concurrentOrder.payment.paymentOrderId } : {}),
+            ...(concurrentOrder.payment.gateway !== 'cod_verified' ? { keyId: process.env.RAZORPAY_KEY_ID } : {}),
           });
+          return;
         }
 
         res.status(409).json({
@@ -231,14 +318,7 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
     const finalPayablePaise = grossProductValuePaise + deliveryFeePaise;
 
     if (finalPayablePaise < 100) {
-      for (const reserved of reservedItems) {
-        await CropListing.findByIdAndUpdate(reserved.listingId, {
-          $inc: {
-            availableQuantity: reserved.quantity,
-            reservedQuantity: -reserved.quantity,
-          },
-        });
-      }
+      await releaseReservedItems();
       res.status(400).json({ success: false, message: 'Payment amount must be at least 100 paise.' });
       return;
     }
@@ -352,20 +432,50 @@ export async function createPaymentOrder(req: AuthRequest, res: Response): Promi
     });
   } catch (err: any) {
     if (!orderCreated) {
-      for (const reserved of reservedItems) {
-        await CropListing.findByIdAndUpdate(reserved.listingId, {
-          $inc: {
-            availableQuantity: reserved.quantity,
-            reservedQuantity: -reserved.quantity,
-          },
+      try {
+        await releaseReservedItems();
+      } catch (releaseError) {
+        console.error('[payment] Failed to roll back reserved inventory', {
+          orderIdempotencyKey: typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : undefined,
+          error: releaseError instanceof Error ? releaseError.message : 'unknown_error',
         });
+        res.status(500).json({
+          success: false,
+          message: 'Order creation failed and inventory reconciliation needs review.',
+        });
+        return;
       }
     }
 
-    const statusCode = err.statusCode || err.status || 500;
+    if (err?.code === 11000 && typeof req.body?.idempotencyKey === 'string' && req.user) {
+      const existingOrder = await Order.findOne({
+        idempotencyKey: req.body.idempotencyKey.trim(),
+        buyerId: req.user._id,
+      });
+      if (existingOrder) {
+        res.status(200).json({
+          success: true,
+          message: 'Order already processed (idempotent)',
+          orderId: existingOrder._id,
+          orderNumber: existingOrder.orderNumber,
+          paymentMethod: existingOrder.payment.gateway === 'cod_verified' ? 'cod' : 'razorpay',
+          amountPaise: existingOrder.pricing.finalPayablePaise,
+          currency: 'INR',
+          ...(existingOrder.payment.paymentOrderId ? { razorpayOrderId: existingOrder.payment.paymentOrderId } : {}),
+          ...(existingOrder.payment.gateway !== 'cod_verified' ? { keyId: process.env.RAZORPAY_KEY_ID } : {}),
+        });
+        return;
+      }
+      res.status(409).json({ success: false, message: 'This idempotency key has already been used.' });
+      return;
+    }
+
+    const statusCode = err instanceof z.ZodError ? 400 : err.statusCode || err.status || 500;
     res.status(statusCode === 401 ? 401 : statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
       success: false,
-      message: err.message || 'Could not create Razorpay order.',
+      message: err instanceof z.ZodError
+        ? err.issues[0]?.message || 'Check the order details and try again.'
+        : err.message || 'Could not create Razorpay order.',
     });
   }
 }

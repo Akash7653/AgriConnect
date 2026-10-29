@@ -52,8 +52,8 @@ interface AuthResponse {
 interface RegistrationResponse {
   success: boolean;
   message: string;
-  email: string;
-  otpSent: boolean;
+  token: string;
+  user: Partial<User> & { email: string; name?: string };
 }
 
 export const AuthService = {
@@ -87,35 +87,6 @@ export const AuthService = {
     });
   },
 
-  async resendEmailVerification(email: string): Promise<{ message: string }> {
-    return request<{ message: string }>('/auth/verification/email/resend', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-  },
-
-  async resendOtp(email: string): Promise<{ message: string }> {
-    return request<{ message: string }>('/auth/resend-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-  },
-
-  async verifyOtp(email: string, otp: string): Promise<AuthSession> {
-    const response = await request<AuthResponse>('/auth/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email, otp }),
-    });
-    return { token: response.token, user: AuthService.mapUser(response.user) };
-  },
-
-  async confirmEmailVerification(token: string): Promise<{ email: string; emailVerified: boolean }> {
-    return request<{ email: string; emailVerified: boolean }>('/auth/verification/email/confirm', {
-      method: 'POST',
-      body: JSON.stringify({ token }),
-    });
-  },
-
   async register(payload: {
     fullName: string;
     email: string;
@@ -129,14 +100,14 @@ export const AuthService = {
       state: string;
       pinCode: string;
     };
-  }): Promise<RegistrationResponse> {
+  }): Promise<AuthSession> {
     if (!AppConfig.isBackendConfigured) {
       throw new ApiError(
         'Backend not configured. Registration requires VITE_API_BASE_URL to be set.',
         0
       );
     }
-    return request<RegistrationResponse>('/auth/signup', {
+    const response = await request<RegistrationResponse>('/auth/signup', {
       method: 'POST',
       body: JSON.stringify({
         name: payload.fullName,
@@ -147,6 +118,7 @@ export const AuthService = {
         ...(payload.farm ? { farm: payload.farm } : {}),
       }),
     });
+    return { token: response.token, user: AuthService.mapUser(response.user) };
   },
 
   persistSession(session: AuthSession) {

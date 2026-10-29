@@ -91,6 +91,7 @@ test('granted geolocation automatically fills checkout and saves the buyer addre
     const { page, profileUpdates } = await prepareMarketplace(context);
     await page.getByRole('button', { name: 'Detect my location' }).click();
     await expect(page.getByText('Location found. Confirm your delivery address.')).toBeVisible();
+    await expect(page.getByText(/GPS estimates your position within about \d+ m/)).toBeVisible();
     expect(profileUpdates).toHaveLength(0);
     await page.getByRole('button', { name: 'Confirm and save address' }).click();
     await expect(page.getByText('Delivery address confirmed: Pune, Maharashtra.')).toBeVisible();

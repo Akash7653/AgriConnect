@@ -9,7 +9,6 @@ import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage';
-import { VerifyAccountPage } from '@/pages/VerifyAccountPage';
 import { DashboardRoute } from '@/pages/dashboard/DashboardRoute';
 import { PublicStorefrontPage } from '@/pages/PublicStorefrontPage';
 import { AdvisorChat } from '@/components/advisor/AdvisorChat';
@@ -27,7 +26,7 @@ function AppRoutes() {
   return (
     <>
       {showIntro && <AIntro onComplete={() => setShowIntro(false)} />}
-      {!['/login', '/register', '/forgot-password', '/reset-password', '/verify-account'].includes(location.pathname) && !isDashboard && <Navbar />}
+      {!['/login', '/register', '/forgot-password', '/reset-password'].includes(location.pathname) && !isDashboard && <Navbar />}
       <AnimatePresence mode="wait">
         <Routes location={location}>
           <Route path="/" element={<LandingPage />} />
@@ -35,7 +34,6 @@ function AppRoutes() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/verify-account" element={<VerifyAccountPage />} />
           <Route path="/shop" element={<PublicStorefrontPage />} />
           <Route path="/dashboard/*" element={<DashboardRoute />} />
           <Route path="*" element={<LandingPage />} />

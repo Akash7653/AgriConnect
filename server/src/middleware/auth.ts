@@ -64,15 +64,6 @@ export async function authenticateToken(req: AuthRequest, res: Response, next: N
       return;
     }
 
-    if (!user.emailVerified) {
-      res.status(403).json({
-        success: false,
-        code: 'EMAIL_NOT_VERIFIED',
-        message: 'Verify your email address before continuing.',
-      });
-      return;
-    }
-
     req.user = user;
     next();
   } catch (err: any) {

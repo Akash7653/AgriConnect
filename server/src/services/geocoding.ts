@@ -265,7 +265,7 @@ async function reverseWithNominatim(latitude: number, longitude: number, started
   const address = parsed.data.address;
   const city = address?.city || address?.town || address?.village || address?.municipality
     || address?.suburb || address?.neighbourhood;
-  const district = address?.county || address?.state_district || city;
+  const district = address?.state_district || address?.county || city;
   const line1 = [address?.house_number, address?.road || address?.pedestrian || address?.residential]
     .filter(Boolean).join(' ');
   try {

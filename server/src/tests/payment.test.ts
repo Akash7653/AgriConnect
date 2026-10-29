@@ -12,6 +12,7 @@ import { FarmerProfile } from '../models/FarmerProfile.js';
 import { seedDatabase } from '../scripts/seed.js';
 import { expirePendingOrders } from '../jobs/expirePendingOrders.js';
 import { processAutomaticPayouts } from '../services/automaticPayouts.js';
+import { ServiceZone } from '../models/ServiceZone.js';
 
 const {
   createRazorpayOrderMock,
@@ -61,9 +62,19 @@ beforeAll(async () => {
   process.env.RAZORPAY_KEY_SECRET = 'unit-test-razorpay-secret';
   await connectDB();
   await seedDatabase();
+  await ServiceZone.deleteMany({ name: 'Payment Test Zone' });
+  await ServiceZone.create({
+    name: 'Payment Test Zone',
+    city: 'Hyderabad',
+    state: 'Telangana',
+    postalCodes: ['500081'],
+    active: true,
+    fulfilmentMethods: ['supplier_delivery', 'third_party_delivery'],
+  });
 }, 30000);
 
 afterAll(async () => {
+  await ServiceZone.deleteMany({ name: 'Payment Test Zone' });
   if (originalRazorpayKeySecret === undefined) delete process.env.RAZORPAY_KEY_SECRET;
   else process.env.RAZORPAY_KEY_SECRET = originalRazorpayKeySecret;
   if (originalWebhookSecret === undefined) delete process.env.RAZORPAY_WEBHOOK_SECRET;
@@ -98,7 +109,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
     const before = await CropListing.findById(listingId);
     const idempotencyKey = `cod-checkout-${Date.now()}`;
     const payload = {
-      items: [{ listingId, quantity: 1 }],
+      items: [{ listingId, quantity: 1 }, { listingId, quantity: 1 }],
       deliveryAddress: {
         recipientName: 'Priya Sharma',
         phone: '9123456789',
@@ -126,6 +137,8 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
     expect(order?.payment.status).toBe('pending');
     expect(order?.payment.gateway).toBe('cod_verified');
     expect(order?.payment.paymentOrderId).toBeUndefined();
+    expect(order?.items).toHaveLength(1);
+    expect(order?.items[0].quantity).toBe(2);
 
     const repeated = await request(app)
       .post('/api/payment/create-order')
@@ -134,7 +147,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
     expect(repeated.status).toBe(200);
     expect(repeated.body.orderId).toBe(created.body.orderId);
     const afterRepeat = await CropListing.findById(listingId);
-    expect(afterRepeat?.availableQuantity).toBe(before!.availableQuantity - 1);
+    expect(afterRepeat?.availableQuantity).toBe(before!.availableQuantity - 2);
 
     const cancelled = await request(app)
       .patch(`/api/orders/${created.body.orderId}/status`)
@@ -143,6 +156,110 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
     expect(cancelled.status).toBe(200);
     const afterCancel = await CropListing.findById(listingId);
     expect(afterCancel?.availableQuantity).toBe(before!.availableQuantity);
+  });
+
+  it('1b. Restricts checkout to buyers and rejects products owned by unapproved farmers', async () => {
+    const farmerLogin = await request(app).post('/api/auth/login').send({
+      email: 'farmer@agriconnect.in',
+      password: testSeedPassword,
+    });
+    expect(farmerLogin.status).toBe(200);
+    const payload = {
+      items: [{ listingId, quantity: 1 }],
+      deliveryAddress: {
+        recipientName: 'Priya Sharma',
+        phone: '9123456789',
+        addressLine1: 'Madhapur',
+        city: 'Hyderabad',
+        district: 'Hyderabad',
+        state: 'Telangana',
+        pinCode: '500081',
+      },
+      deliverySlot: { date: new Date().toISOString().slice(0, 10), timeWindow: '07:00 AM - 11:00 AM' },
+      idempotencyKey: `role-check-${Date.now()}-test`,
+    };
+    const forbiddenRole = await request(app)
+      .post('/api/payment/create-order')
+      .set('Authorization', `Bearer ${farmerLogin.body.token}`)
+      .send(payload);
+    expect(forbiddenRole.status).toBe(403);
+
+    const listing = await CropListing.findById(listingId);
+    const farmer = await User.findById(listing!.farmerId);
+    expect(farmer).toBeDefined();
+    farmer!.isVerified = false;
+    await farmer!.save();
+    try {
+      const response = await request(app)
+        .post('/api/payment/create-order')
+        .set('Authorization', `Bearer ${buyerToken}`)
+        .send({ ...payload, idempotencyKey: `seller-check-${Date.now()}-test` });
+      expect(response.status).toBe(409);
+      expect(response.body.message).toMatch(/sellers are not approved/i);
+    } finally {
+      farmer!.isVerified = true;
+      await farmer!.save();
+    }
+  });
+
+  it('1c. Requires configured serviceability and rejects fractional quantities before reserving stock', async () => {
+    const listingBefore = await CropListing.findById(listingId);
+    const payload = {
+      items: [{ listingId, quantity: 1 }],
+      deliveryAddress: {
+        recipientName: 'Priya Sharma',
+        phone: '9123456789',
+        addressLine1: 'Madhapur',
+        city: 'Hyderabad',
+        district: 'Hyderabad',
+        state: 'Telangana',
+        pinCode: '500081',
+      },
+      deliverySlot: { date: new Date().toISOString().slice(0, 10), timeWindow: '07:00 AM - 11:00 AM' },
+      idempotencyKey: `serviceability-${Date.now()}-test`,
+    };
+
+    await ServiceZone.deleteMany({ name: 'Payment Test Zone' });
+    try {
+      const unconfigured = await request(app)
+        .post('/api/payment/create-order')
+        .set('Authorization', `Bearer ${buyerToken}`)
+        .send(payload);
+      expect(unconfigured.status).toBe(503);
+      expect(unconfigured.body.code).toBe('SERVICEABILITY_NOT_CONFIGURED');
+
+      await ServiceZone.create({
+        name: 'Payment Test Zone',
+        city: 'Hyderabad',
+        state: 'Telangana',
+        postalCodes: ['500081'],
+        active: true,
+        fulfilmentMethods: ['supplier_delivery', 'third_party_delivery'],
+      });
+      const fractionalQuantity = await request(app)
+        .post('/api/payment/create-order')
+        .set('Authorization', `Bearer ${buyerToken}`)
+        .send({
+          ...payload,
+          items: [{ listingId, quantity: 1.5 }],
+          idempotencyKey: `fractional-${Date.now()}-test`,
+        });
+      expect(fractionalQuantity.status).toBe(400);
+    } finally {
+      await ServiceZone.deleteMany({ name: 'Payment Test Zone' });
+      await ServiceZone.create({
+        name: 'Payment Test Zone',
+        city: 'Hyderabad',
+        state: 'Telangana',
+        postalCodes: ['500081'],
+        active: true,
+        fulfilmentMethods: ['supplier_delivery', 'third_party_delivery'],
+      });
+    }
+
+    const listingAfter = await CropListing.findById(listingId);
+    expect(listingAfter?.availableQuantity).toBe(listingBefore?.availableQuantity);
+    expect(listingAfter?.reservedQuantity).toBe(listingBefore?.reservedQuantity);
   });
 
   it('2. Should create Razorpay order with server-calculated amount and atomic stock reservation', async () => {
@@ -167,6 +284,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
           date: new Date().toISOString().split('T')[0],
           timeWindow: '07:00 AM - 11:00 AM',
         },
+        idempotencyKey: `razorpay-checkout-${Date.now()}-key`,
       });
 
     expect(res.status).toBe(201);
@@ -231,6 +349,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
           date: new Date().toISOString().split('T')[0],
           timeWindow: '07:00 AM - 11:00 AM',
         },
+        idempotencyKey: `razorpay-verify-${Date.now()}-key`,
       });
 
     expect(createRes.status).toBe(201);
@@ -441,6 +560,7 @@ describe('AgriConnect Razorpay Payment Integration & Security Tests', () => {
           city: 'Hyderabad', district: 'Hyderabad', state: 'Telangana', pinCode: '500081',
         },
         deliverySlot: { date: new Date().toISOString().slice(0, 10), timeWindow: '07:00 AM - 11:00 AM' },
+        idempotencyKey: `razorpay-expiry-${Date.now()}-key`,
       });
     expect(createRes.status).toBe(201);
 

@@ -29,7 +29,7 @@ export const swaggerDocument = {
   paths: {
     '/api/auth/register': {
       post: {
-        summary: 'Start signup and send an email verification OTP',
+        summary: 'Create an account and return an authenticated session',
         requestBody: {
           required: true,
           content: {
@@ -42,68 +42,31 @@ export const swaggerDocument = {
                   email: { type: 'string' },
                   password: { type: 'string' },
                   role: { type: 'string', enum: ['farmer', 'buyer', 'business', 'logistics'] },
-                  phone: { type: 'string', description: 'Optional contact phone number; email verification is the only registration verification.' },
+                  phone: { type: 'string', description: 'Optional contact phone number; no phone or email verification is required.' },
+                  farm: { type: 'object', description: 'Required when requesting farmer access; farmer access remains subject to administrator approval.' },
                 },
               },
             },
           },
         },
         responses: {
-          202: { description: 'Pending signup created and code sent' },
+          201: { description: 'Account created; access token and user returned' },
           400: { description: 'Invalid signup input' },
           409: { description: 'Email already registered' },
-          502: { description: 'Email provider rejected delivery' },
-          503: { description: 'Email provider is not configured' },
         },
       },
     },
     '/api/auth/signup': {
       post: {
-        summary: 'Alias for starting signup with an email verification OTP',
-        responses: { 202: { description: 'Pending signup created and code sent' } },
-      },
-    },
-    '/api/auth/verify-otp': {
-      post: {
-        summary: 'Verify a six-digit code and create the User account',
-        security: [],
-        responses: {
-          200: { description: 'Email verified; session token and User returned' },
-          400: { description: 'Invalid, expired, or locked code' },
-          409: { description: 'Email already registered' },
-        },
-      },
-    },
-    '/api/auth/resend-otp': {
-      post: {
-        summary: 'Request a replacement signup OTP',
-        security: [],
-        responses: {
-          202: { description: 'Generic request accepted' },
-          429: { description: 'Cooldown or hourly limit reached' },
-          502: { description: 'Email provider failed to deliver' },
-        },
-      },
-    },
-    '/api/auth/verification/email/resend': {
-      post: {
-        summary: 'Legacy email-link resend for existing accounts',
-        security: [],
-        responses: { 202: { description: 'Request accepted' } },
-      },
-    },
-    '/api/auth/verification/email/confirm': {
-      post: {
-        summary: 'Consume a legacy one-time email verification token',
-        security: [],
-        responses: { 200: { description: 'Email verified' }, 400: { description: 'Invalid or expired token' } },
+        summary: 'Alias for immediate account creation',
+        responses: { 201: { description: 'Account created; access token and user returned' } },
       },
     },
     '/api/auth/login': {
       post: {
         summary: 'Log in with email and password to receive JWT',
         security: [],
-        responses: { 200: { description: 'Success' }, 403: { description: 'Email verification required' } },
+        responses: { 200: { description: 'Success' }, 401: { description: 'Invalid email or password' } },
       },
     },
     '/api/health/email': {

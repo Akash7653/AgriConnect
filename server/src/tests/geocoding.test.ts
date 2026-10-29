@@ -64,6 +64,28 @@ describe('reverse geocoding service', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('prefers the administrative district over county in Nominatim results', async () => {
+    vi.stubEnv('GEOCODER_PRIMARY', 'nominatim');
+    vi.stubEnv('GEOCODER_FALLBACK', '');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      display_name: 'Locality, District, State, 411001',
+      address: {
+        suburb: 'Locality',
+        state_district: 'District',
+        county: 'County',
+        state: 'State',
+        postcode: '411001',
+        country: 'India',
+      },
+    })));
+
+    await expect(reverseGeocode(18.5204, 73.8567)).resolves.toMatchObject({
+      city: 'Locality',
+      district: 'District',
+      locality: 'Locality',
+    });
+  });
+
   it('caches successful results for rounded coordinate keys', async () => {
     const fetchMock = vi.fn(async () => Response.json(googleAddress));
     vi.stubGlobal('fetch', fetchMock);

@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, Lock, Mail, Loader2 } from 'lucide-react';
 import { AuthLayout } from '@/components/auth/AuthLayout';
 import { Input } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
-import { ApiError, AuthService } from '@/services/api';
 
 export function LoginPage() {
   const { signIn, isBackendConfigured } = useAuth();
@@ -17,22 +16,9 @@ export function LoginPage() {
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [needsVerification, setNeedsVerification] = useState(false);
-  const [resendingVerification, setResendingVerification] = useState(false);
-  const [verificationNotice, setVerificationNotice] = useState('');
-  const [resendCooldown, setResendCooldown] = useState(0);
-
-  useEffect(() => {
-    if (resendCooldown <= 0) return;
-    const timer = window.setTimeout(() => setResendCooldown((remaining) => Math.max(0, remaining - 1)), 1000);
-    return () => window.clearTimeout(timer);
-  }, [resendCooldown]);
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    setVerificationNotice('');
-    setNeedsVerification(false);
     if (!email || !password) {
       setError('Please enter both email and password.');
       return;
@@ -51,25 +37,9 @@ export function LoginPage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign in failed.';
       setError(message);
-      setNeedsVerification(err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED');
       showToast(message, 'error');
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function resendVerification() {
-    setResendingVerification(true);
-    setVerificationNotice('');
-    try {
-      const result = await AuthService.resendOtp(email);
-      setVerificationNotice(result.message);
-      setResendCooldown(60);
-    } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : 'Could not process the request. Please try again shortly.';
-      setVerificationNotice(message);
-    } finally {
-      setResendingVerification(false);
     }
   }
 
@@ -126,31 +96,6 @@ export function LoginPage() {
         {error && (
           <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-600">
             {error}
-            {needsVerification && (
-              <div className="mt-2 space-y-2">
-                <Link
-                  to="/verify-account"
-                  state={{ email, otpSent: false, redirectTo: searchParams.get('redirect') || '/dashboard' }}
-                  className="block font-semibold underline"
-                >
-                  Continue to email verification
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => void resendVerification()}
-                  disabled={resendingVerification || resendCooldown > 0 || !email}
-                  className="inline-flex min-h-9 items-center gap-2 font-semibold underline disabled:opacity-50"
-                >
-                  {resendingVerification && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {resendingVerification
-                    ? 'Sending…'
-                    : resendCooldown > 0
-                      ? `Resend available in ${resendCooldown}s`
-                      : 'Resend verification code'}
-                </button>
-                {verificationNotice && <p role="status" className="text-xs">{verificationNotice}</p>}
-              </div>
-            )}
           </div>
         )}
 

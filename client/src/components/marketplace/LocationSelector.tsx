@@ -21,6 +21,7 @@ interface LocationSelectorProps {
 interface Coordinates {
   lat: number;
   lng: number;
+  accuracyMeters: number;
 }
 
 const emptyAddress: ResolvedAddress = {
@@ -69,7 +70,11 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
         if (currentAttempt !== attemptId.current) return;
-        const position = { lat: coords.latitude, lng: coords.longitude };
+        const position = {
+          lat: coords.latitude,
+          lng: coords.longitude,
+          accuracyMeters: coords.accuracy,
+        };
         setCoordinates(position);
         setMessage('Resolving your address…');
         const currentController = new AbortController();
@@ -194,6 +199,11 @@ export function LocationSelector({ onResolved }: LocationSelectorProps) {
           <p className="flex items-center gap-2 text-sm font-semibold text-forest">
             <MapPin className="h-4 w-4 text-agri-green" /> Confirm delivery address
           </p>
+          {coordinates && Number.isFinite(coordinates.accuracyMeters) && (
+            <p className="text-xs text-charcoal/65">
+              GPS estimates your position within about {Math.max(1, Math.round(coordinates.accuracyMeters))} m. Confirm or edit the address below.
+            </p>
+          )}
           <label className="block text-xs font-medium text-charcoal/70">
             House, flat, road or landmark
             <input

@@ -5,7 +5,6 @@ import { AuthLayout } from '@/components/auth/AuthLayout';
 import { Input } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
-import { ApiError, AuthService } from '@/services/api';
 
 function registrationRoleLabel(role: 'buyer' | 'farmer' | 'business' | 'logistics'): string {
   switch (role) {
@@ -39,13 +38,9 @@ export function RegisterPage() {
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [retryingOtp, setRetryingOtp] = useState(false);
-  const [otpDeliveryFailed, setOtpDeliveryFailed] = useState(false);
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    setOtpDeliveryFailed(false);
     if (!fullName || !email || !password) {
       setError('Please fill in all required fields.');
       return;
@@ -70,7 +65,7 @@ export function RegisterPage() {
     }
     setLoading(true);
     try {
-      const result = await signUp({
+      await signUp({
         fullName,
         email,
         password,
@@ -78,36 +73,19 @@ export function RegisterPage() {
         role,
         ...(role === 'farmer' ? { farm } : {}),
       });
-      showToast('Signup saved temporarily. Check your email for the six-digit verification code.', 'success');
-      navigate('/verify-account', {
-        state: {
-          email: result.email,
-          otpSent: result.otpSent,
-          redirectTo: searchParams.get('redirect') || '/dashboard',
-        },
-      });
+      showToast(
+        role === 'buyer'
+          ? 'Your account is ready. You are now signed in.'
+          : 'Your account is ready. Requested access is pending administrator approval.',
+        'success'
+      );
+      navigate(searchParams.get('redirect') || '/dashboard');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed.';
       setError(message);
-      setOtpDeliveryFailed(err instanceof ApiError && err.code === 'OTP_DELIVERY_FAILED');
       showToast(message, 'error');
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function retryOtpDelivery() {
-    setRetryingOtp(true);
-    setError('');
-    try {
-      await AuthService.resendOtp(email.trim().toLowerCase());
-      navigate('/verify-account', {
-        state: { email: email.trim().toLowerCase(), otpSent: true, redirectTo: searchParams.get('redirect') || '/dashboard' },
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not send your verification code. Please retry.');
-    } finally {
-      setRetryingOtp(false);
     }
   }
 
@@ -141,12 +119,12 @@ export function RegisterPage() {
         </label>
         <p className="rounded-lg bg-forest/5 p-3 text-sm text-charcoal/65">
           {role === 'buyer'
-            ? 'Verify your email address to activate sign-in. A phone number is optional.'
-            : `Verify your email before signing in. ${registrationRoleLabel(role)} access also requires administrator approval.`}
+            ? 'Your account will be ready immediately. A phone number is optional.'
+            : `${registrationRoleLabel(role)} account sign-in is available immediately. Requested access still requires administrator approval.`}
         </p>
         {role === 'farmer' && (
           <fieldset className="grid gap-3 rounded-xl border border-forest/10 p-4 sm:grid-cols-2">
-            <legend className="px-1 text-sm font-semibold text-forest">Farm details for review</legend>
+            <legend className="px-1 text-sm font-semibold text-forest">Farm details for administrator review</legend>
             {Object.entries(farm).map(([field, value]) => (
               <Input
                 key={field}
@@ -222,16 +200,6 @@ export function RegisterPage() {
         {error && (
           <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-600">
             {error}
-            {otpDeliveryFailed && (
-              <button
-                type="button"
-                onClick={() => void retryOtpDelivery()}
-                disabled={retryingOtp}
-                className="mt-2 block font-semibold underline disabled:opacity-50"
-              >
-                {retryingOtp ? 'Retrying…' : 'Retry sending verification code'}
-              </button>
-            )}
           </div>
         )}
 

@@ -2,18 +2,12 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { AuthService, request } from '@/services/api';
 import type { AuthSession, User } from '@/types';
 
-interface SignUpResult {
-  email: string;
-  otpSent: boolean;
-}
-
 interface AuthContextValue {
   user: User | null;
   session: AuthSession | null;
   isAuthenticated: boolean;
   isBackendConfigured: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  verifyOtp: (email: string, otp: string) => Promise<void>;
   signUp: (payload: {
     fullName: string;
     email: string;
@@ -27,7 +21,7 @@ interface AuthContextValue {
       state: string;
       pinCode: string;
     };
-  }) => Promise<SignUpResult>;
+  }) => Promise<void>;
   signOut: () => void;
   updateAddress: (address: User['address']) => Promise<void>;
 }
@@ -53,14 +47,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         AuthService.persistSession(s);
         setSession(s);
       },
-      async verifyOtp(email, otp) {
-        const s = await AuthService.verifyOtp(email, otp);
+      async signUp(payload) {
+        const s = await AuthService.register(payload);
         AuthService.persistSession(s);
         setSession(s);
-      },
-      async signUp(payload) {
-        const response = await AuthService.register(payload);
-        return { email: response.email, otpSent: response.otpSent };
       },
       signOut() {
         AuthService.clearSession();

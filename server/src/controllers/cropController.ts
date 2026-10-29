@@ -24,10 +24,10 @@ export const createListingSchema = z.object({
   description: z.string().min(10, 'Description must be at least 10 characters'),
   images: z.array(z.string()).default([]),
   qualityGrade: z.enum(['A+', 'A', 'B+', 'B']).default('A'),
-  pricePerUnitPaise: z.number().min(100, 'Price must be at least ₹1.00'),
+  pricePerUnitPaise: z.number().int().min(100, 'Price must be at least ₹1.00'),
   unit: z.enum(['kg', 'quintal', 'box', 'bunch', 'crate']).default('kg'),
-  availableQuantity: z.number().min(1, 'Available quantity must be at least 1'),
-  minOrderQuantity: z.number().default(1),
+  availableQuantity: z.number().int().min(1, 'Available quantity must be at least 1'),
+  minOrderQuantity: z.number().int().min(1).default(1),
   harvestDate: z.string().refine((d) => !isNaN(Date.parse(d)), 'Valid harvest date required'),
   expectedShelfLifeDays: z.number().default(5),
   village: z.string().min(1, 'Village is required'),
@@ -37,16 +37,20 @@ export const createListingSchema = z.object({
   isOrganicCertified: z.boolean().default(false),
 });
 
+function canManageListingsAsFarmer(user: NonNullable<AuthRequest['user']>): boolean {
+  return user.role === USER_ROLES.FARMER && user.isVerified && user.status === 'active';
+}
+
 const listingUpdateSchema = z.object({
   cropName: z.string().min(2).optional(),
   variety: z.string().optional(),
   category: z.enum(['Vegetables', 'Fruits', 'Grains & Cereals', 'Pulses', 'Spices', 'Greens & Herbs', 'Organic Special']).optional(),
   description: z.string().min(10).optional(),
-  pricePerUnitPaise: z.coerce.number().min(100).optional(),
-  availableQuantity: z.coerce.number().min(0).optional(),
+  pricePerUnitPaise: z.coerce.number().int().min(100).optional(),
+  availableQuantity: z.coerce.number().int().min(0).optional(),
   qualityGrade: z.enum(['A+', 'A', 'B+', 'B']).optional(),
   status: z.enum(['active', 'paused', 'archived']).optional(),
-  minOrderQuantity: z.coerce.number().min(1).optional(),
+  minOrderQuantity: z.coerce.number().int().min(1).optional(),
   harvestDate: z.string().refine((date) => !Number.isNaN(Date.parse(date))).optional(),
   village: z.string().min(1).optional(),
   district: z.string().min(1).optional(),
@@ -56,8 +60,8 @@ const listingUpdateSchema = z.object({
 
 export async function createListing(req: AuthRequest, res: Response): Promise<void> {
   try {
-    if (!req.user || req.user.role !== USER_ROLES.FARMER) {
-      res.status(403).json({ success: false, message: 'Only registered farmers can create crop listings' });
+    if (!req.user || !canManageListingsAsFarmer(req.user)) {
+      res.status(403).json({ success: false, message: 'Only approved, active farmers can create crop listings.' });
       return;
     }
 
@@ -228,13 +232,24 @@ export async function getListingById(req: Request, res: Response): Promise<void>
       status: 'active',
       availableQuantity: { $gt: 0 },
     })
-      .populate('farmerId', 'name isVerified')
       .populate('farmerProfileId', 'farmName fpoAffiliation location');
 
     if (!listing) {
       res.status(404).json({ success: false, message: 'Crop listing not found' });
       return;
     }
+    const activeSeller = await User.exists({
+      _id: listing.farmerId,
+      role: USER_ROLES.FARMER,
+      isVerified: true,
+      status: 'active',
+      ...(process.env.NODE_ENV === 'production' ? { email: { $nin: SEEDED_DEMO_ACCOUNT_EMAILS } } : {}),
+    });
+    if (!activeSeller) {
+      res.status(404).json({ success: false, message: 'Crop listing not found' });
+      return;
+    }
+    await listing.populate('farmerId', 'name isVerified');
 
     // Increment view count
     listing.viewsCount += 1;
@@ -282,6 +297,10 @@ export async function updateListing(req: AuthRequest, res: Response): Promise<vo
 
     if (!isOwner && !isAdmin) {
       res.status(403).json({ success: false, message: 'Not authorized to modify this listing' });
+      return;
+    }
+    if (req.user.role === USER_ROLES.FARMER && !canManageListingsAsFarmer(req.user)) {
+      res.status(403).json({ success: false, message: 'Only approved, active farmers can modify crop listings.' });
       return;
     }
 
@@ -345,8 +364,8 @@ function validateUploadedImage(buffer: Buffer, contentType: string): boolean {
 
 export async function uploadListingImage(req: AuthRequest, res: Response): Promise<void> {
     try {
-      if (!req.user || req.user.role !== USER_ROLES.FARMER) {
-        res.status(403).json({ success: false, message: 'Only the owning farmer can upload product images.' });
+      if (!req.user || !canManageListingsAsFarmer(req.user)) {
+        res.status(403).json({ success: false, message: 'Only approved, active farmers can upload product images.' });
         return;
       }
       if (!req.file) {
@@ -383,8 +402,8 @@ export async function uploadListingImage(req: AuthRequest, res: Response): Promi
 
 export async function removeListingImage(req: AuthRequest, res: Response): Promise<void> {
     try {
-      if (!req.user || req.user.role !== USER_ROLES.FARMER) {
-        res.status(403).json({ success: false, message: 'Only the owning farmer can remove product images.' });
+      if (!req.user || !canManageListingsAsFarmer(req.user)) {
+        res.status(403).json({ success: false, message: 'Only approved, active farmers can remove product images.' });
         return;
       }
       const { publicId } = z.object({ publicId: z.string().min(1).max(300) }).strict().parse(req.body);
@@ -432,6 +451,10 @@ export async function deleteListing(req: AuthRequest, res: Response): Promise<vo
 
     if (!isOwner && !isAdmin) {
       res.status(403).json({ success: false, message: 'Not authorized' });
+      return;
+    }
+    if (req.user.role === USER_ROLES.FARMER && !canManageListingsAsFarmer(req.user)) {
+      res.status(403).json({ success: false, message: 'Only approved, active farmers can archive crop listings.' });
       return;
     }
 
